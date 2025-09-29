@@ -3,10 +3,12 @@ package linescript6
 import (
     "fmt"
     "sync"
+    "strconv"
+    "time"
 )
 
 type State struct {
-    FileName
+    Filename string
     I int
     Code string
     Vals *List
@@ -14,11 +16,13 @@ type State struct {
 	LexicalParent *State
 	CallingParent *State
 	CurFunc func(*State) *State
+	CurFuncName string
 	CurFuncSpot int
 	NewlineSpot int
 	Mu sync.Mutex
 	Counter int
 	ICache []*ICache
+	OnEnd func(*State) *State
 }
 
 type TokenCacheValue struct {
@@ -38,17 +42,16 @@ type FindMatchingResult struct {
 }
 
 func New() *State {
-	&State{
+	return &State{
 		Vals:          NewList(),
 		Vars:          NewRecord(), // since it's global, we reuse global vars
-		LexicalParent: s,
-		Mu:            sync.Mutex,
+		Mu:            sync.Mutex{},
 	}
 }
-func (s *State) E(code state) *State {
+func (s *State) E(code string) *State {
     s.Counter++
 	freshState := &State{
-		FileName: "__evaled_" + strconv.Itoa(s.Counter),
+		Filename: "__evaled_" + strconv.Itoa(s.Counter),
 		I:             0,
 		Code:          code,
 		Vals:          s.Vals,
@@ -59,12 +62,23 @@ func (s *State) E(code state) *State {
 	}
 	state := freshState
 	for {
+        // time.Sleep(500 * time.Millisecond)
+        // fmt.Println("getting next token")
+
 	    if state == nil {
 	        break
 	    }
+	    // if state.I >= len(state.Code) {
+	    //     break
+	    // }
+	    
 	    name, tokenFunc := state.GetNextToken()
 	    _ = name
-	    state = tokenFunc(state)
+	    // fmt.Println("got token", ToJsonF(name))
+	    
+	    if tokenFunc != nil {
+	    	state = tokenFunc(state)
+	    }
 	}
 	return freshState
 }
@@ -73,80 +87,112 @@ func (s *State) E(code state) *State {
 var immediates = map[string]func(*State) *State {
     "\n": func(s *State) *State {
         for {
+            // time.Sleep(500 * time.Millisecond)
+            // fmt.Println("calling func", s.CurFuncName)
+
             if s.CurFunc == nil {
                 break
             }
-            s = s.CurFunc(s)
+            newS := s.CurFunc(s)
+            if newS == s {
+                s.CurFunc = nil
+                s.CurFuncName = ""
+            }
+            s = newS
         }
         return s
     },
-    
+    "end": func(s *State) *State {
+        if s.OnEnd != nil {
+            s = s.OnEnd(s)
+            return s
+        }
+        s = s.CallingParent
+        return s
+    },
 }
+
 var builtins = map[string]func(*State) *State {
     "say1": func(s *State) *State {
         v := s.Pop()
-        fmt.Println()
+        fmt.Println(v)
+        return s
     },
 }
 
 
 func (s *State) GetNextToken() (string, func (*State) *State) {
     parseState := "out"
-    
-    name := ""
-    var funcToken func(*State) *State
+
+    name := "end"
+    funcToken := immediates["end"]
     startToken := -1
     i := s.I
 loop:
     for i = s.I; i < len(s.Code); i++ {
-        chr := s.Code[i]
-        switch chr {
-        case "\n", "(", ")", "{", "}", "[", "]", ";", ",":
-            name = chr
-            funcToken = immediates[chr]
-            i++
+        // fmt.Println("    reading", i, len(s.Code))
+        if i >= len(s.Code) {
+            name = "end"
+            funcToken = immediates[name]
             break loop
         }
-        
+
+        chr := s.Code[i]
+
+
+        // time.Sleep(1 * time.Millisecond)
+        // fmt.Println("    reading", i, string(chr), len(s.Code))
+
         switch parseState {
         case "out":
             switch chr {
-            case " ", "\t":
+            case ' ', '\t':
+            case '\n', '(', ')', '{', '}', '[', ']', ';', ',':
+                name = string(chr)
+                if immediate, ok := immediates[name]; ok {
+                    funcToken = immediate
+                    i++
+                    break loop
+                }
             default:
-                parseState := "in"
-                startToken := i
+                parseState = "in"
+                startToken = i
             }
         case "in":
             switch chr {
-            case " ", "\t", "\n":
-                name := s.Code[startToken:i]
-                if i != "\n" {
+            case ' ', '\t', '\n', '(', ')', '{', '}', '[', ']', ';', ',':
+                name = s.Code[startToken:i]
+                if chr == ' ' || chr == '\t' {
                     i++
                 }
-                if builtin, ok := builtins["name"]; ok {
-                    funcToken = func(s *State) State {
+                if immediate, ok := immediates[name]; ok {
+                    funcToken = immediate
+                    i++
+                    break loop
+                }
+                if builtin, ok := builtins[name]; ok {
+                    funcToken = func(s *State) *State {
                         s.CurFunc = builtin
+                        s.CurFuncName = name
                         return s
                     }
                     break loop
                 }
-                if immediate, ok := builtins["name"]; ok {
-                    funcToken = func(s *State) State {
-                        return immediate(s)
-                    }
+                if immediate, ok := immediates[name]; ok {
+                    funcToken = immediate
                     break loop
                 }
 
 				if f, err := strconv.ParseFloat(name, 64); err == nil {
-                    funcToken = func(s *State) State {
+                    funcToken = func(s *State) *State {
                         s.Push(f)
                         return s
                     }
                     break loop
                 }
 
-                if len(name) >= 1 && name[0] == "." {
-                    funcToken = func(s *State) State {
+                if len(name) >= 1 && name[0] == '.' {
+                    funcToken = func(s *State) *State {
                         s.Push(name[1:])
                         return s
                     }
@@ -154,15 +200,19 @@ loop:
                 }
 
                 _, v := s.findParentAndValue(name)
-                switch v := v.(type) {
+                switch v.(type) {
                 case *Func:
-                    funcToken = func(s *State) State {
+                    funcToken = func(s *State) *State {
                         v := s.Get(name)
-                        s.CurFunc = v
+                        s.CurFunc = func (s *State) *State {
+                            s.Push(v)
+                            return s
+                        }
+                        s.CurFuncName = name
                         return s
                     }
                 default:
-                    funcToken = func(s *State) State {
+                    funcToken = func(s *State) *State {
                         s.Push(Token{Name: name})
                         return s
                     }
@@ -172,10 +222,6 @@ loop:
         }
     }
 
-    if i == len(s.Code) {
-        name = "done"
-        funcToken = immediates[name]
-    }
 
     s.I = i
     return name, funcToken
@@ -195,7 +241,7 @@ func init() {
 func E(code string) {
     GlobalState.E(code)
 }
-func (state *State) GetVal(val any) any {
+func (s *State) GetVal(val any) any {
     switch val := val.(type) {
     case Token:
         return s.Get(val.Name)
@@ -215,6 +261,9 @@ func (state *State) Get(varName string) any {
 func (state *State) findParentAndValue(varName string) (*State, any) {
 	scopesUp := 0
 	for state != nil {
+        time.Sleep(500 * time.Millisecond)
+        fmt.Println("going up scope", varName)
+        
 		v, ok := state.Vars.GetHas(varName)
 		if ok {
 			return state, v
@@ -230,6 +279,10 @@ func (s *State) Push(v any) {
 }
 func (s *State) Pop() any {
 	return s.Vals.Pop()
+}
+func (s *State) PopVal() any {
+	 v := s.Vals.Pop()
+	 return s.GetVal(v)
 }
 
 func (state *State) Let(varName string, v any) {
@@ -248,65 +301,14 @@ func (state *State) Var(varNameAny any, v any) {
 }
 
 
-/*
+type Func struct {
+	Filename string
+	I        int
+	Code         string
+	ICache []*ICache
+	Params            []string
+	LexicalParent     *State
+	Builtin           func(state *State) *State
+	Name              string
+}
 
-if x is 3
-    say "hello"
-end
-
-
-number a 36
-
-
-record person
-    name "Drew"
-end
-
-list numbers
-    30 40 50
-end
-
-
-
-
-
-
-if ( a is 3 )
-
-*/
-	// FuncTokens         []func(*State) *State
-	// FuncTokenStack     [][]func(*State) *State
-	// FuncTokenSpots     []int // position of the first "argument" in vals, even tho it can grab from earlier
-	// FuncTokenSpotStack [][]int
-	// FuncTokenNames     []string
-	// FuncTokenNameStack [][]string
- //
-	// NewlineSpot              int
-	// Breakables []Breakable
-
-// type Func struct {
-// 	FileName string
-// 	I        int
-// 	EndI     int
-// 	// Note: the code and the cache should be bundled? (check perf)
-// 	Code         string
-// 	// ICache []*ICache
-// 
-// 	// TODO check these caches, or combine them ?
-// 	// in a function are they correctly copied?
-// 	Params            []string
-// 	LexicalParent     *State
-// 	Builtin           func(state *State) *State
-// 	Name              string
-// 
-// 	// oneliner serves 2 things
-// 	// one after def: func: loop: each: if:
-// 	// and the other the state in the function
-// 	// very closely related?
-// 	OneLiner bool
-// }
-// 
-// type Breakable struct {
-//     Indent string
-//     Type string
-// }
