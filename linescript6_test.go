@@ -1,11 +1,8 @@
-
-
 package linescript6
 
-
 import (
-    // "fmt"
-    // "testing"
+// "fmt"
+// "testing"
 )
 
 // func TestE(t *testing.T) {
@@ -15,15 +12,15 @@ import (
 // }
 
 func ExampleE_hello() {
-    E(`
+	E(`
         say1 .hello
     `)
 
-    // Output:
-    // hello
+	// Output:
+	// hello
 }
 func ExampleE_helloUpper() {
-    E(`
+	E(`
         say1 upper .hello
         .Cloud upper
         say1
@@ -36,10 +33,10 @@ func ExampleE_helloUpper() {
         
     `)
 
-    // Output:
-    // HELLO
-    // CLOUD
-    // WALLPAPER
-    // GRAPE
-    // SQUARE
+	// Output:
+	// HELLO
+	// CLOUD
+	// WALLPAPER
+	// GRAPE
+	// SQUARE
 }
