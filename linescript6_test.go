@@ -18,7 +18,15 @@ func ExampleE_hello() {
     E(`
         say1 .hello
     `)
-    
+
     // Output:
     // hello
 }
+// func ExampleE_helloUpper() {
+//     E(`
+//         say1 upper .hello
+//     `)
+// 
+//     // Output:
+//     // HELLO
+// }

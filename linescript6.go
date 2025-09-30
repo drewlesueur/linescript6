@@ -5,24 +5,34 @@ import (
     "sync"
     "strconv"
     "time"
+    "strings"
 )
+
+type CurFuncInfo struct {
+	Func func(*State) *State
+	Name string
+	Spot int
+	Parent *CurFuncInfo
+}
+type OnEndInfo struct {
+	OnEnd func(*State) *State
+	Parent *OnEndInfo
+}
 
 type State struct {
     Filename string
     I int
     Code string
+	ICache []*ICache
     Vals *List
 	Vars  *Record
 	LexicalParent *State
 	CallingParent *State
-	CurFunc func(*State) *State
-	CurFuncName string
-	CurFuncSpot int
+	CurFuncInfo *CurFuncInfo
 	NewlineSpot int
-	Mu sync.Mutex
-	Counter int
-	ICache []*ICache
-	OnEnd func(*State) *State
+	Mu *sync.Mutex
+	Counter *int
+	OnEndInfo *OnEndInfo
 }
 
 type TokenCacheValue struct {
@@ -42,16 +52,18 @@ type FindMatchingResult struct {
 }
 
 func New() *State {
+	counter := 0
 	return &State{
 		Vals:          NewList(),
 		Vars:          NewRecord(), // since it's global, we reuse global vars
-		Mu:            sync.Mutex{},
+		Mu:            &sync.Mutex{},
+		Counter: &counter,
 	}
 }
 func (s *State) E(code string) *State {
-    s.Counter++
+    *s.Counter = *s.Counter + 1
 	freshState := &State{
-		Filename: "__evaled_" + strconv.Itoa(s.Counter),
+		Filename: "__evaled_" + strconv.Itoa(*s.Counter),
 		I:             0,
 		Code:          code,
 		Vals:          s.Vals,
@@ -59,6 +71,7 @@ func (s *State) E(code string) *State {
 		LexicalParent: s,
 		CallingParent: nil,
 		Mu:            s.Mu,
+		Counter: s.Counter,
 	}
 	state := freshState
 	for {
@@ -90,22 +103,25 @@ var immediates = map[string]func(*State) *State {
             // time.Sleep(500 * time.Millisecond)
             // fmt.Println("calling func", s.CurFuncName)
 
-            if s.CurFunc == nil {
+            if s.CurFuncInfo == nil {
                 break
             }
-            newS := s.CurFunc(s)
+            newS := s.CurFuncInfo.Func(s)
+            // like a bee that only stings once
             if newS == s {
-                s.CurFunc = nil
-                s.CurFuncName = ""
+                newS.CurFuncInfo = newS.CurFuncInfo.Parent
             }
             s = newS
         }
         return s
     },
     "end": func(s *State) *State {
-        if s.OnEnd != nil {
-            s = s.OnEnd(s)
-            return s
+        if s.OnEndInfo != nil {
+            newS := s.OnEndInfo.OnEnd(s)
+            if newS == s {
+                newS.OnEndInfo = newS.OnEndInfo.Parent
+            }
+            return newS
         }
         s = s.CallingParent
         return s
@@ -114,16 +130,24 @@ var immediates = map[string]func(*State) *State {
 
 var builtins = map[string]func(*State) *State {
     "say1": func(s *State) *State {
-        v := s.Pop()
+        v := s.PopVal()
         fmt.Println(v)
+        return s
+    },
+    "upper": func(s *State) *State {
+        v := s.PopVal()
+        s.Push(strings.ToUpper(toStringInternal(v)))
+        return s
+    },
+    "lower": func(s *State) *State {
+        v := s.PopVal()
+        s.Push(strings.ToLower(toStringInternal(v)))
         return s
     },
 }
 
-
 func (s *State) GetNextToken() (string, func (*State) *State) {
     parseState := "out"
-
     name := "end"
     funcToken := immediates["end"]
     startToken := -1
@@ -138,7 +162,6 @@ loop:
         }
 
         chr := s.Code[i]
-
 
         // time.Sleep(1 * time.Millisecond)
         // fmt.Println("    reading", i, string(chr), len(s.Code))
@@ -172,8 +195,17 @@ loop:
                 }
                 if builtin, ok := builtins[name]; ok {
                     funcToken = func(s *State) *State {
-                        s.CurFunc = builtin
-                        s.CurFuncName = name
+                        cfi := &CurFuncInfo{
+                            Func:builtin,
+                            Spot: s.Vals.Len(),
+                            Name: name,
+                        }
+                        if s.CurFuncInfo == nil {
+                            s.CurFuncInfo = cfi
+                        } else {
+                            cfi.Parent = s.CurFuncInfo
+                            s.CurFuncInfo = cfi
+                        }
                         return s
                     }
                     break loop
@@ -203,12 +235,40 @@ loop:
                 switch v.(type) {
                 case *Func:
                     funcToken = func(s *State) *State {
-                        v := s.Get(name)
-                        s.CurFunc = func (s *State) *State {
-                            s.Push(v)
-                            return s
+                        v := s.Get(name).(*Func)
+                        cfi := &CurFuncInfo{
+                            Func: func (s *State) *State {
+                                newState := &State{
+                                    Filename: v.Filename,
+                                    I: v.I,
+                                    Code: v.Code,
+                                    ICache: v.ICache,
+                                    Vals: s.Vals,
+	                                Vars: NewRecord(),
+	                                LexicalParent: v.LexicalParent,
+	                                CallingParent: s,
+	                                CurFuncInfo: nil,
+	                                NewlineSpot: s.NewlineSpot,
+	                                Mu: s.Mu,
+	                                Counter: s.Counter,
+	                                OnEndInfo: nil,
+                                }
+  
+		                        for i := len(v.Params) - 1; i >= 0; i-- {
+		                        	param := v.Params[i]
+		                        	newState.Vars.Set(param, s.PopVal())
+		                        }
+                                return newState
+                            },
+                            Spot: s.Vals.Len(),
+                            Name: name,
                         }
-                        s.CurFuncName = name
+                        if s.CurFuncInfo == nil {
+                            s.CurFuncInfo = cfi
+                        } else {
+                            cfi.Parent = s.CurFuncInfo
+                            s.CurFuncInfo = cfi
+                        }
                         return s
                     }
                 default:
@@ -221,7 +281,6 @@ loop:
             }
         }
     }
-
 
     s.I = i
     return name, funcToken
@@ -308,7 +367,6 @@ type Func struct {
 	ICache []*ICache
 	Params            []string
 	LexicalParent     *State
-	Builtin           func(state *State) *State
 	Name              string
 }
 
