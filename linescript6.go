@@ -100,9 +100,19 @@ func (s *State) E(code string) *State {
 var immediates = map[string]func(*State) *State {
     "\n": func(s *State) *State {
         for {
-            // time.Sleep(500 * time.Millisecond)
-            // fmt.Println("calling func", s.CurFuncName)
-
+            if s.CurFuncInfo == nil {
+                break
+            }
+            newS := s.CurFuncInfo.Func(s)
+            if newS == s {
+                newS.CurFuncInfo = newS.CurFuncInfo.Parent
+            }
+            s = newS
+        }
+        return s
+    },
+    ";": func(s *State) *State {
+        for {
             if s.CurFuncInfo == nil {
                 break
             }
@@ -113,6 +123,18 @@ var immediates = map[string]func(*State) *State {
             }
             s = newS
         }
+        return s
+    },
+    ",": func(s *State) *State {
+        if s.CurFuncInfo == nil {
+            return s
+        }
+        newS := s.CurFuncInfo.Func(s)
+        // like a bee that only stings once
+        if newS == s {
+            newS.CurFuncInfo = newS.CurFuncInfo.Parent
+        }
+        s = newS
         return s
     },
     "end": func(s *State) *State {
