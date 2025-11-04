@@ -8,7 +8,6 @@ import (
 type Token struct {
     Name string
     IsString bool
-    TokensType string
     Tokens []Token
     Action func(*State) *State
     SourceIndex int
@@ -115,7 +114,7 @@ func Tokenize(sources []any, filename string) []Tokens {
 // onEnd list (stack) of closures is the trick
 // auto indent nested tokens
 func ParseString(src, filename string) []Tokens {
-	tokenStack := []Token{}
+	tokenStack := [][]Token{}
 	tokens := []Token{}
 	parseState := "out"
 	name := "end"
@@ -123,7 +122,6 @@ func ParseString(src, filename string) []Tokens {
 	startToken := -1
 	i := 0
 	isString := false
-	tokensType := "("
 loop:
 	for i = i; i < len(src); i++ {
 		isString = false
@@ -140,72 +138,70 @@ loop:
     theSwitch:
 		switch chr {
 		case '(', '{', '[':
-		    tokenStack = append(tokenStack, Token{
-		        Tokens: tokens,
-		        TokensType: tokensType
-		    })
-		    tokensType = string(chr)
+		    tokenStack = append(tokenStack, tokens)
 		    tokens = []Token{}
 		    continue
 		case ')':
-	     	parentToken := tokenStack[len(tokenStack)-1]
-			parentToken.Tokens = append(parentToken.Tokens, Token{
+	     	parentTokens := tokenStack[len(tokenStack)-1]
+			parentTokens = append(parentTokens, Token{
 	       		SourceIndex: i,
 	       		Source: src,
 	       		Tokens: tokens,
-	       		TokensType: tokensType,
-	       		name: tokensType,
+	       		name: ")",
 	       		Action: func(s *State) *State {
        		        s.Push(tokens)
        		        return s
 	       		}
 	 	    })
-		    tokens = parentToken.Tokens
-		    tokensType = parentToken.TokensType
+		    tokens = parentTokens
 		    tokenStack = tokenStack[0 : len(tokenStack)-1]
 		    continue
 		case ']':
-	     	parentToken := tokenStack[len(tokenStack)-1]
-			parentToken.Tokens = append(parentToken.Tokens, Token{
+	     	parentTokens := tokenStack[len(tokenStack)-1]
+			parentTokens = append(parentTokens, Token{
 	       		SourceIndex: i,
 	       		Source: src,
 	       		Tokens: tokens,
-	       		TokensType: tokensType,
-	       		name: tokensType,
+	       		name: "]",
 	       		Action: func(s *State) *State {
 	       		    vals := s.Vals
 	       		    s.Vals := NewList()
-	       		    s.CodeStack = append(s.CodeStack, s.Code)
 	       		    s.Code = tokens
-	       		    s.OnEnd = func(s *State) *State {
-	       		        
+	       		    s.OnEndInfo = &OnEndInfo{
+	       		        OnEnd: func(s *State) *State {
+	       		            myList := s.Vals
+	       		            s.Vals = vals
+	       		            s.Vals.Push(myList)
+	       		    	}
+	       		    	Parent: s.OnEndInfo
 	       		    }
 	       		}
 	 	    })
-		    tokens = parentToken.Tokens
-		    tokensType = parentToken.TokensType
+		    tokens = parentTokens
 		    tokenStack = tokenStack[0 : len(tokenStack)-1]
 		    continue
 		case '}':
-	     	parentToken := tokenStack[len(tokenStack)-1]
-			parentToken.Tokens = append(parentToken.Tokens, Token{
+	     	parentTokens := tokenStack[len(tokenStack)-1]
+			parentTokens = append(parentTokens, Token{
 	       		SourceIndex: i,
 	       		Source: src,
 	       		Tokens: tokens,
-	       		TokensType: tokensType,
-	       		name: tokensType,
+	       		name: "}",
 	       		Action: func(s *State) *State {
-
-       		        // TODO: could move this conditional out of closure
-       		        if tokensType == "]" {
-
-       		        } else if tokensType == "}" {
-
-       		        }
+	       		    vals := s.Vals
+	       		    s.Vals := NewList()
+	       		    s.Code = tokens
+	       		    s.OnEndInfo = &OnEndInfo{
+	       		        OnEnd: func(s *State) *State {
+	       		            myList := s.Vals
+	       		            s.Vals = vals
+	       		            s.Vals.Push(myList)
+	       		    	}
+	       		    	Parent: s.OnEndInfo
+	       		    }
 	       		}
 	 	    })
-		    tokens = parentToken.Tokens
-		    tokensType = parentToken.TokensType
+		    tokens = parentTokens
 		    tokenStack = tokenStack[0 : len(tokenStack)-1]
 		    continue
 		}
