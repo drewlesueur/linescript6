@@ -173,7 +173,7 @@ loop:
 	       		            s.Vals = vals
 	       		            s.Vals.Push(myList)
 	       		    	}
-	       		    	Parent: s.OnEndInfo
+	       		    	Parent: s.OnEndInfo,
 	       		    }
 	       		}
 	 	    })
@@ -194,10 +194,14 @@ loop:
 	       		    s.OnEndInfo = &OnEndInfo{
 	       		        OnEnd: func(s *State) *State {
 	       		            myList := s.Vals
+	       		            myRecord := NewRecord()
+	       		            for i := 0; i < myList.Length() - 1; i += 2 {
+	       		                myRecord.Set(myList.At(i+1), myList.At(i+2))
+	       		            }
 	       		            s.Vals = vals
-	       		            s.Vals.Push(myList)
+	       		            s.Vals.Push(myRecord)
 	       		    	}
-	       		    	Parent: s.OnEndInfo
+	       		    	Parent: s.OnEndInfo,
 	       		    }
 	       		}
 	 	    })
@@ -235,18 +239,12 @@ loop:
 				}
 				if builtin, ok := builtins[name]; ok {
 					funcToken = func(s *State) *State {
-						cfi := &CurFuncInfo{
+						s.CurFuncInfo = &CurFuncInfo{
 							Func: builtin,
 							Spot: s.Vals.Len(),
 							Name: name,
+							Parent: s.CurFuncInfo,
 						}
-						if s.CurFuncInfo == nil {
-							s.CurFuncInfo = cfi
-						} else {
-							cfi.Parent = s.CurFuncInfo
-							s.CurFuncInfo = cfi
-						}
-						return s
 					}
 					break theSwitch
 				}
@@ -424,6 +422,15 @@ var immediates = map[string]func(*State) *State{
 }
 
 var builtins = map[string]func(*State) *State{
+	"do": func(s *State) *State {
+		v := s.Pop().([]Token)
+		oldCode := s.Code
+		oldI := s.I
+		s.code = v
+		s.I = 0
+		
+		return s
+	},
 	"say1": func(s *State) *State {
 		v := s.Pop()
 		fmt.Println(v)
