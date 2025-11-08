@@ -1,14 +1,17 @@
-package main
+package linescript6
 
 
 import (
     "fmt"
+    "strconv"
+    "strings"
+    "time"
 )
 
 type Token struct {
     Name string
     IsString bool
-    Tokens []Token
+    Tokens *[]Token
     Action func(*State) *State
     SourceIndex int
     Source string
@@ -16,14 +19,14 @@ type Token struct {
 }
 type State struct {
 	I             int
-	Code          []Token
+	Code          *[]Token
 	Vals          *List
 	Vars          *Record
 	LexicalParent *State
 	CallingParent *State
 	CurFuncInfo   *CurFuncInfo
+	InCurrentCall bool
 	NewlineSpot   int
-	Mu            sync.Mutex
 	OnEndInfo     *OnEndInfo
 }
 type CurFuncInfo struct {
@@ -37,9 +40,9 @@ type OnEndInfo struct {
 	Parent *OnEndInfo
 }
 
-func Tokenize(sources []any, filename string) []Tokens {
+func Tokenize(sources []any, filename string) []Token {
     tokens := []Token{}
-    for src := range sources {
+    for _, src := range sources {
         switch src := src.(type) {
         case string:
             tokens = append(tokens, ParseString(src, filename)...)
@@ -67,7 +70,7 @@ func Tokenize(sources []any, filename string) []Tokens {
 			})
 		case func(any) any:
 			tokens = append(tokens, Token{
-			    Action: func(s *State) *State 			    Action: func(s *State) *State {
+			    Action: func(s *State) *State {
 					s.Push(src(s.Pop()))
 			    	return s
 			    },
@@ -75,7 +78,7 @@ func Tokenize(sources []any, filename string) []Tokens {
 			})
 		case func(any):
 			tokens = append(tokens, Token{
-			    Action: func(s *State) *State 			    Action: func(s *State) *State {
+			    Action: func(s *State) *State {
 					src(s.Pop())
 			    	return s
 			    },
@@ -83,7 +86,7 @@ func Tokenize(sources []any, filename string) []Tokens {
 			})
 		case func(string) string:
 			tokens = append(tokens, Token{
-			    Action: func(s *State) *State
+			    Action: func(s *State) *State {
 					s.Push(src(toStringInternal(s.Pop())))
 			    	return s
 			    },
@@ -91,7 +94,7 @@ func Tokenize(sources []any, filename string) []Tokens {
 			})
 		case func(string, string) string:
 			tokens = append(tokens, Token{
-			    Action: func(s *State) *State
+			    Action: func(s *State) *State {
 					b := toStringInternal(s.Pop())
 					a := toStringInternal(s.Pop())
 					s.Push(src(a, b))
@@ -101,7 +104,8 @@ func Tokenize(sources []any, filename string) []Tokens {
 			})
 		default:
 			tokens = append(tokens, Token{
-			    Action: func(s *State) *State
+			    Name: "customType",
+			    Action: func(s *State) *State {
 					s.Push(src)
 			    	return s
 			    },
@@ -113,7 +117,7 @@ func Tokenize(sources []any, filename string) []Tokens {
 }
 // onEnd list (stack) of closures is the trick
 // auto indent nested tokens
-func ParseString(src, filename string) []Tokens {
+func ParseString(src, filename string) []Token {
 	tokenStack := [][]Token{}
 	tokens := []Token{}
 	parseState := "out"
@@ -135,7 +139,6 @@ loop:
 
 		// time.Sleep(1 * time.Millisecond)
 		// fmt.Println("    reading", i, string(chr), len(s.Code))
-    theSwitch:
 		switch chr {
 		case '(', '{', '[':
 		    tokenStack = append(tokenStack, tokens)
@@ -146,12 +149,12 @@ loop:
 			parentTokens = append(parentTokens, Token{
 	       		SourceIndex: i,
 	       		Source: src,
-	       		Tokens: tokens,
-	       		name: ")",
+	       		Tokens: &tokens,
+	       		Name: ")",
 	       		Action: func(s *State) *State {
-       		        s.Push(tokens)
+       		        s.Push(&tokens)
        		        return s
-	       		}
+	       		},
 	 	    })
 		    tokens = parentTokens
 		    tokenStack = tokenStack[0 : len(tokenStack)-1]
@@ -161,21 +164,23 @@ loop:
 			parentTokens = append(parentTokens, Token{
 	       		SourceIndex: i,
 	       		Source: src,
-	       		Tokens: tokens,
-	       		name: "]",
+	       		Tokens: &tokens,
+	       		Name: "]",
 	       		Action: func(s *State) *State {
 	       		    vals := s.Vals
-	       		    s.Vals := NewList()
-	       		    s.Code = tokens
+	       		    s.Vals = NewList()
+	       		    s.Code = &tokens
 	       		    s.OnEndInfo = &OnEndInfo{
 	       		        OnEnd: func(s *State) *State {
 	       		            myList := s.Vals
 	       		            s.Vals = vals
 	       		            s.Vals.Push(myList)
-	       		    	}
+	       		            return s
+	       		    	},
 	       		    	Parent: s.OnEndInfo,
 	       		    }
-	       		}
+	       		    return s
+	       		},
 	 	    })
 		    tokens = parentTokens
 		    tokenStack = tokenStack[0 : len(tokenStack)-1]
@@ -185,25 +190,27 @@ loop:
 			parentTokens = append(parentTokens, Token{
 	       		SourceIndex: i,
 	       		Source: src,
-	       		Tokens: tokens,
-	       		name: "}",
+	       		Tokens: &tokens,
+	       		Name: "}",
 	       		Action: func(s *State) *State {
 	       		    vals := s.Vals
-	       		    s.Vals := NewList()
-	       		    s.Code = tokens
+	       		    s.Vals = NewList()
+	       		    s.Code = &tokens
 	       		    s.OnEndInfo = &OnEndInfo{
 	       		        OnEnd: func(s *State) *State {
 	       		            myList := s.Vals
 	       		            myRecord := NewRecord()
 	       		            for i := 0; i < myList.Length() - 1; i += 2 {
-	       		                myRecord.Set(myList.At(i+1), myList.At(i+2))
+	       		                myRecord.Set(myList.Get(i+1).(string), myList.Get(i+2))
 	       		            }
 	       		            s.Vals = vals
 	       		            s.Vals.Push(myRecord)
-	       		    	}
+	       		            return s
+	       		    	},
 	       		    	Parent: s.OnEndInfo,
-	       		    }
-	       		}
+  	       		    }
+       	            return s
+	       		},
 	 	    })
 		    tokens = parentTokens
 		    tokenStack = tokenStack[0 : len(tokenStack)-1]
@@ -218,7 +225,7 @@ loop:
 				if immediate, ok := immediates[name]; ok {
 					funcToken = immediate
 					// i++
-					break theSwitch
+					break
 				}
 			default:
 				parseState = "in"
@@ -235,7 +242,7 @@ loop:
 				if immediate, ok := immediates[name]; ok {
 					funcToken = immediate
 					// i++
-					break theSwitch
+					break
 				}
 				if builtin, ok := builtins[name]; ok {
 					funcToken = func(s *State) *State {
@@ -245,8 +252,9 @@ loop:
 							Name: name,
 							Parent: s.CurFuncInfo,
 						}
+						return s
 					}
-					break theSwitch
+					break
 				}
 
 				if f, err := strconv.ParseFloat(name, 64); err == nil {
@@ -254,7 +262,7 @@ loop:
 						s.Push(f)
 						return s
 					}
-					break theSwitch
+					break
 				}
 
 				if len(name) >= 1 && name[0] == '.' {
@@ -263,13 +271,13 @@ loop:
 						s.Push(name[1:])
 						return s
 					}
-					break theSwitch
+					break
 				}
 
                 // you could either do the closure
                 // or just push 2 things to the tokens slice
 				funcToken = func(s *State) *State {
-					_, v := s.findParentAndValue(name)
+					_, v := s.FindParentAndValue(name)
 					switch v.(type) {
 					// case *Func:
 					// 	v := s.Get(name).(*Func)
@@ -315,7 +323,8 @@ loop:
 		tokens = append(tokens, Token{
 		    Action: funcToken,
 		    Name: name,
-		    I: i,
+		    SourceIndex: i,
+		    Source: src,
 		    IsString: isString,
 		})
 	}
@@ -377,6 +386,8 @@ var immediates = map[string]func(*State) *State{
 			newS := s.CurFuncInfo.Func(s)
 			if newS == s {
 				newS.CurFuncInfo = newS.CurFuncInfo.Parent
+			} else {
+			    s.InCurrentCall = true
 			}
 			s = newS
 		}
@@ -391,6 +402,8 @@ var immediates = map[string]func(*State) *State{
 			// like a bee that only stings once
 			if newS == s {
 				newS.CurFuncInfo = newS.CurFuncInfo.Parent
+			} else {
+			    s.InCurrentCall = true
 			}
 			s = newS
 		}
@@ -423,11 +436,19 @@ var immediates = map[string]func(*State) *State{
 
 var builtins = map[string]func(*State) *State{
 	"do": func(s *State) *State {
-		v := s.Pop().([]Token)
+		v := s.Pop().(*[]Token)
 		oldCode := s.Code
 		oldI := s.I
-		s.code = v
+		s.Code = v
 		s.I = 0
+        s.OnEndInfo = &OnEndInfo{
+           OnEnd: func(s *State) *State {
+               s.Code = oldCode
+               s.I = oldI
+               return s
+           },
+           Parent: s.OnEndInfo,
+        }
 		
 		return s
 	},
@@ -453,4 +474,93 @@ func (s *State) Push(v any) {
 }
 func (s *State) Pop() any {
 	return s.Vals.Pop()
+}
+var GlobalState *State
+
+func init() {
+	GlobalState = New()
+}
+
+func E(sources ...any) {
+	GlobalState.E(sources...)
+}
+func New() *State {
+	return &State{
+		Vals:    NewList(),
+		Vars:    NewRecord(), // since it's global, we reuse global vars
+	}
+}
+
+func (s *State) E(code ...any) *State {
+	filename := "__evaled_" + strconv.Itoa(int(time.Now().UnixNano()))
+	tokens := Tokenize(code, filename)
+	s.R(tokens)
+	return s
+}
+
+func (s *State) R(tokens []Token) *State {
+	freshState := &State{
+		I:             0,
+		Code:          &tokens,
+		Vals:          s.Vals,
+		Vars:          s.Vars,
+		LexicalParent: s,
+		CallingParent: nil,
+	}
+	state := freshState
+	origState := state
+	origTokens := &tokens
+
+	for {
+		// time.Sleep(500 * time.Millisecond)
+		// fmt.Println("getting next token")
+
+		if state == nil {
+			break
+		}
+		// if state.I >= len(state.Code) {
+		//     break
+		// }
+        t := (*state.Code)[state.I]
+        newState := t.Action(state)
+
+        if newState == nil {
+            // <- state.Ch
+        } else if newState == origState && newState.Code == origTokens && newState.I >= len(*newState.Code)-1  {
+            break
+        }
+        state.I++
+        state = newState
+	}
+	return freshState
+}
+
+func (state *State) FindParentAndValue(varName string) (*State, any) {
+	scopesUp := 0
+	for state != nil {
+		time.Sleep(500 * time.Millisecond)
+		fmt.Println("going up scope", varName)
+
+		v, ok := state.Vars.GetHas(varName)
+		if ok {
+			return state, v
+		}
+		state = state.LexicalParent
+		scopesUp++
+	}
+	return nil, nil
+}
+func (state *State) Let(varName string, v any) {
+	parent, _ := state.FindParentAndValue(varName)
+	if parent == nil {
+		panic("var not found " + varName)
+	}
+	parent.Vars.Set(varName, v)
+}
+func (state *State) Var(varNameAny any, v any) {
+	varName := varNameAny.(string)
+	if state.Vars == nil {
+		state.Vars = NewRecord()
+	}
+	state.Vars.Set(varName, v)
 }
