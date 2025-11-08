@@ -11,15 +11,16 @@ import (
 type Token struct {
     Name string
     IsString bool
-    Tokens *[]Token
+    Tokens []Token
     Action func(*State) *State
     SourceIndex int
     Source string
     Filename string
 }
+
 type State struct {
 	I             int
-	Code          *[]Token
+	Code          []Token
 	Vals          *List
 	Vars          *Record
 	LexicalParent *State
@@ -28,7 +29,9 @@ type State struct {
 	InCurrentCall bool
 	NewlineSpot   int
 	OnEndInfo     *OnEndInfo
+	CallbacksCh chan Callback
 }
+
 type CurFuncInfo struct {
 	Func   func(*State) *State
 	Name   string
@@ -38,6 +41,11 @@ type CurFuncInfo struct {
 type OnEndInfo struct {
 	OnEnd  func(*State) *State
 	Parent *OnEndInfo
+}
+type Callback struct {
+	State        *State
+	ReturnValues *List
+	Vars *Record
 }
 
 func Tokenize(sources []any, filename string) []Token {
@@ -149,10 +157,10 @@ loop:
 			parentTokens = append(parentTokens, Token{
 	       		SourceIndex: i,
 	       		Source: src,
-	       		Tokens: &tokens,
+	       		Tokens: tokens,
 	       		Name: ")",
 	       		Action: func(s *State) *State {
-       		        s.Push(&tokens)
+       		        s.Push(tokens)
        		        return s
 	       		},
 	 	    })
@@ -164,12 +172,12 @@ loop:
 			parentTokens = append(parentTokens, Token{
 	       		SourceIndex: i,
 	       		Source: src,
-	       		Tokens: &tokens,
+	       		Tokens: tokens,
 	       		Name: "]",
 	       		Action: func(s *State) *State {
 	       		    vals := s.Vals
 	       		    s.Vals = NewList()
-	       		    s.Code = &tokens
+	       		    s.Code = tokens
 	       		    s.OnEndInfo = &OnEndInfo{
 	       		        OnEnd: func(s *State) *State {
 	       		            myList := s.Vals
@@ -190,12 +198,12 @@ loop:
 			parentTokens = append(parentTokens, Token{
 	       		SourceIndex: i,
 	       		Source: src,
-	       		Tokens: &tokens,
+	       		Tokens: tokens,
 	       		Name: "}",
 	       		Action: func(s *State) *State {
 	       		    vals := s.Vals
 	       		    s.Vals = NewList()
-	       		    s.Code = &tokens
+	       		    s.Code = tokens
 	       		    s.OnEndInfo = &OnEndInfo{
 	       		        OnEnd: func(s *State) *State {
 	       		            myList := s.Vals
@@ -379,48 +387,42 @@ func Slice(state *State) *State {
 
 var immediates = map[string]func(*State) *State{
 	"\n": func(s *State) *State {
-		for {
-			if s.CurFuncInfo == nil {
-				break
-			}
-			newS := s.CurFuncInfo.Func(s)
-			if newS == s {
-				newS.CurFuncInfo = newS.CurFuncInfo.Parent
-			} else {
-			    s.InCurrentCall = true
-			}
-			s = newS
-		}
+		s.InCurrentCall = true
 		return s
+		// if s.CurFuncInfo == nil {
+		// 	return s
+		// }
+		// f := s.CurFuncInfo.Func
+		// p := s.CurFuncInfo.Parent
+		// s.CurFuncInfo = p
+	 //    s.InCurrentCall = true
+		// newS := f(s)
+		// return newS
 	},
 	";": func(s *State) *State {
-		for {
-			if s.CurFuncInfo == nil {
-				break
-			}
-			newS := s.CurFuncInfo.Func(s)
-			// like a bee that only stings once
-			if newS == s {
-				newS.CurFuncInfo = newS.CurFuncInfo.Parent
-			} else {
-			    s.InCurrentCall = true
-			}
-			s = newS
-		}
+		s.InCurrentCall = true
 		return s
+		// if s.CurFuncInfo == nil {
+		// 	return s
+		// }
+		// f := s.CurFuncInfo.Func
+		// p := s.CurFuncInfo.Parent
+		// s.CurFuncInfo = p
+	 //    s.InCurrentCall = true
+		// newS := f(s)
+		// return newS
 	},
 	",": func(s *State) *State {
 		if s.CurFuncInfo == nil {
 			return s
 		}
-		newS := s.CurFuncInfo.Func(s)
-		// like a bee that only stings once
-		if newS == s {
-			newS.CurFuncInfo = newS.CurFuncInfo.Parent
-		}
-		s = newS
-		return s
+		f := s.CurFuncInfo.Func
+		p := s.CurFuncInfo.Parent
+		s.CurFuncInfo = p
+		newS := f(s)
+		return newS
 	},
+	// TODO: this is not hit.
 	"end": func(s *State) *State {
 		if s.OnEndInfo != nil {
 			newS := s.OnEndInfo.OnEnd(s)
@@ -436,7 +438,7 @@ var immediates = map[string]func(*State) *State{
 
 var builtins = map[string]func(*State) *State{
 	"do": func(s *State) *State {
-		v := s.Pop().(*[]Token)
+		v := s.Pop().([]Token)
 		oldCode := s.Code
 		oldI := s.I
 		s.Code = v
@@ -478,16 +480,72 @@ func (s *State) Pop() any {
 var GlobalState *State
 
 func init() {
-	GlobalState = New()
+	GlobalState = NewGlobalState()
 }
 
 func E(sources ...any) {
 	GlobalState.E(sources...)
 }
-func New() *State {
-	return &State{
+
+func NewGlobalState() *State {
+	s := &State{
 		Vals:    NewList(),
 		Vars:    NewRecord(), // since it's global, we reuse global vars
+		CallbacksCh: make(chan Callback),
+	}
+	go s.Chug()
+	return s
+}
+
+func (state *State) Chug() {
+	var newState *State
+	for {
+        newState = nil
+        if state == nil {
+            callback, ok := <-state.CallbacksCh
+            if !ok {
+                break
+            }
+            state = callback.State
+            for _, v := range callback.ReturnValues.TheSlice {
+                state.Push(v)
+            }
+            if callback.Vars != nil {
+                for _, k := range callback.Vars.Keys {
+                    state.Vars.Set(k, callback.Vars.Get(k))
+                }
+            }
+            state.NewlineSpot = state.Vals.Length()
+            continue // you may be fine to not continue, cuz this is at the start
+        }
+
+        if state.InCurrentCall {
+		    if state.CurFuncInfo == nil {
+		    	state.InCurrentCall = false
+			} else {
+				f := state.CurFuncInfo.Func
+				p := state.CurFuncInfo.Parent
+				state.CurFuncInfo = p
+				newState = f(state)
+				state = newState
+			}
+			continue
+        }
+
+        if state.I > len(state.Code) {
+            o := state.OnEndInfo
+            if o != nil {
+                newState = o.OnEnd(state)
+                state.OnEndInfo = o.Parent
+            }
+        } else {
+            t := state.Code[state.I]
+            newState = t.Action(state)
+        }
+
+
+        state.I++
+        state = newState
 	}
 }
 
@@ -499,39 +557,26 @@ func (s *State) E(code ...any) *State {
 }
 
 func (s *State) R(tokens []Token) *State {
+	doneCh := make(chan int)
 	freshState := &State{
 		I:             0,
-		Code:          &tokens,
+		Code:          tokens,
 		Vals:          s.Vals,
 		Vars:          s.Vars,
 		LexicalParent: s,
 		CallingParent: nil,
+		CallbacksCh: s.CallbacksCh,
+		OnEndInfo: &OnEndInfo{
+		    OnEnd: func (s *State) *State {
+        		close(doneCh)
+		        return nil
+		    },
+		},
 	}
-	state := freshState
-	origState := state
-	origTokens := &tokens
-
-	for {
-		// time.Sleep(500 * time.Millisecond)
-		// fmt.Println("getting next token")
-
-		if state == nil {
-			break
-		}
-		// if state.I >= len(state.Code) {
-		//     break
-		// }
-        t := (*state.Code)[state.I]
-        newState := t.Action(state)
-
-        if newState == nil {
-            // <- state.Ch
-        } else if newState == origState && newState.Code == origTokens && newState.I >= len(*newState.Code)-1  {
-            break
-        }
-        state.I++
-        state = newState
-	}
+	s.AddCallback(Callback{
+	    State: freshState,
+	})
+	<-doneCh
 	return freshState
 }
 
@@ -563,4 +608,10 @@ func (state *State) Var(varNameAny any, v any) {
 		state.Vars = NewRecord()
 	}
 	state.Vars.Set(varName, v)
+}
+
+func (state *State) AddCallback(callback Callback) {
+	go func() {
+		state.CallbacksCh <- callback
+	}()
 }
