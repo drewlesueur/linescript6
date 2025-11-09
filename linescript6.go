@@ -6,6 +6,8 @@ import (
     "strconv"
     "strings"
     "time"
+    "log"
+    "os"
 )
 
 type Token struct {
@@ -134,15 +136,8 @@ func ParseString(src, filename string) []Token {
 	startToken := -1
 	i := 0
 	isString := false
-loop:
 	for i = i; i < len(src); i++ {
 		isString = false
-		if i >= len(src) {
-			name = "end"
-			funcToken = immediates[name]
-			break loop
-		}
-
 		chr := src[i]
 
 		// time.Sleep(1 * time.Millisecond)
@@ -498,17 +493,21 @@ func NewGlobalState() *State {
 }
 
 func (state *State) Chug() {
+    var origState = state
 	var newState *State
 	for {
         newState = nil
         if state == nil {
-            callback, ok := <-state.CallbacksCh
+            callback, ok := <-origState.CallbacksCh
             if !ok {
                 break
             }
             state = callback.State
-            for _, v := range callback.ReturnValues.TheSlice {
-                state.Push(v)
+            
+            if callback.ReturnValues != nil {
+                for _, v := range callback.ReturnValues.TheSlice {
+                    state.Push(v)
+                }
             }
             if callback.Vars != nil {
                 for _, k := range callback.Vars.Keys {
@@ -532,7 +531,7 @@ func (state *State) Chug() {
 			continue
         }
 
-        if state.I > len(state.Code) {
+        if state.I >= len(state.Code) {
             o := state.OnEndInfo
             if o != nil {
                 newState = o.OnEnd(state)
@@ -540,9 +539,9 @@ func (state *State) Chug() {
             }
         } else {
             t := state.Code[state.I]
+            log.Println("token:", t.Name)
             newState = t.Action(state)
         }
-
 
         state.I++
         state = newState
@@ -552,6 +551,10 @@ func (state *State) Chug() {
 func (s *State) E(code ...any) *State {
 	filename := "__evaled_" + strconv.Itoa(int(time.Now().UnixNano()))
 	tokens := Tokenize(code, filename)
+	for _, t := range tokens {
+	    log.Println(t.Name)
+	}
+	os.Exit(1)
 	s.R(tokens)
 	return s
 }
