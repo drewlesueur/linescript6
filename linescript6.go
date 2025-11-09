@@ -7,7 +7,7 @@ import (
     "strings"
     "time"
     "log"
-    "os"
+    "encoding/json"
 )
 
 type Token struct {
@@ -131,13 +131,12 @@ func ParseString(src, filename string) []Token {
 	tokenStack := [][]Token{}
 	tokens := []Token{}
 	parseState := "out"
-	name := "end"
-	funcToken := immediates["end"]
+	name := ""
+	var funcToken func (s *State) *State = nil
 	startToken := -1
 	i := 0
 	isString := false
 	for i = i; i < len(src); i++ {
-		isString = false
 		chr := src[i]
 
 		// time.Sleep(1 * time.Millisecond)
@@ -239,7 +238,8 @@ func ParseString(src, filename string) []Token {
 			case ' ', '\t', '\n', ';', ',':
                 parseState = "out"
 				name = src[startToken:i]
-				if chr == ' ' || chr == '\t' {
+				i--
+				if chr == '\n' || chr == ';' || chr == ','  {
 					// i++
 				}
 				if immediate, ok := immediates[name]; ok {
@@ -270,6 +270,7 @@ func ParseString(src, filename string) []Token {
 
 				if len(name) >= 1 && name[0] == '.' {
 					isString = true
+					name := name
 					funcToken = func(s *State) *State {
 						s.Push(name[1:])
 						return s
@@ -323,13 +324,18 @@ func ParseString(src, filename string) []Token {
 				}
 			}
 		}
-		tokens = append(tokens, Token{
-		    Action: funcToken,
-		    Name: name,
-		    SourceIndex: i,
-		    Source: src,
-		    IsString: isString,
-		})
+		if name != "" {
+			tokens = append(tokens, Token{
+			    Action: funcToken,
+			    Name: name,
+			    SourceIndex: i,
+			    Source: src,
+			    IsString: isString,
+			})
+			name = ""
+			isString = false
+			funcToken = nil
+		}
 	}
     return tokens
 
@@ -551,10 +557,6 @@ func (state *State) Chug() {
 func (s *State) E(code ...any) *State {
 	filename := "__evaled_" + strconv.Itoa(int(time.Now().UnixNano()))
 	tokens := Tokenize(code, filename)
-	for _, t := range tokens {
-	    log.Println(t.Name)
-	}
-	os.Exit(1)
 	s.R(tokens)
 	return s
 }
@@ -617,4 +619,12 @@ func (state *State) AddCallback(callback Callback) {
 	go func() {
 		state.CallbacksCh <- callback
 	}()
+}
+
+func toJson(v any) string {
+	b, err := json.MarshalIndent(v, "", "    ")
+	if err != nil {
+		panic(err)
+	}
+	return string(b)
 }
