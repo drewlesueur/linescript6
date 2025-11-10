@@ -20,6 +20,18 @@ type Token struct {
     Filename string
 }
 
+func ShowTokens(indent string, tokens []Token) string {
+    str := ""
+    for _, t := range tokens {
+        if len(t.Tokens) > 0 {
+            str += ShowTokens(indent + "    ", t.Tokens)
+        } else {
+            str += fmt.Sprintf("%s%q\n", indent, t.Name)
+        }
+    }
+    return str
+}
+
 type State struct {
 	I             int
 	Code          []Token
@@ -125,6 +137,7 @@ func Tokenize(sources []any, filename string) []Token {
     }
     return tokens
 }
+
 // onEnd list (stack) of closures is the trick
 // auto indent nested tokens
 func ParseString(src, filename string) []Token {
@@ -141,83 +154,6 @@ func ParseString(src, filename string) []Token {
 
 		// time.Sleep(1 * time.Millisecond)
 		// fmt.Println("    reading", i, string(chr), len(s.Code))
-		switch chr {
-		case '(', '{', '[':
-		    tokenStack = append(tokenStack, tokens)
-		    tokens = []Token{}
-		    continue
-		case ')':
-	     	parentTokens := tokenStack[len(tokenStack)-1]
-			parentTokens = append(parentTokens, Token{
-	       		SourceIndex: i,
-	       		Source: src,
-	       		Tokens: tokens,
-	       		Name: ")",
-	       		Action: func(s *State) *State {
-       		        s.Push(tokens)
-       		        return s
-	       		},
-	 	    })
-		    tokens = parentTokens
-		    tokenStack = tokenStack[0 : len(tokenStack)-1]
-		    continue
-		case ']':
-	     	parentTokens := tokenStack[len(tokenStack)-1]
-			parentTokens = append(parentTokens, Token{
-	       		SourceIndex: i,
-	       		Source: src,
-	       		Tokens: tokens,
-	       		Name: "]",
-	       		Action: func(s *State) *State {
-	       		    vals := s.Vals
-	       		    s.Vals = NewList()
-	       		    s.Code = tokens
-	       		    s.OnEndInfo = &OnEndInfo{
-	       		        OnEnd: func(s *State) *State {
-	       		            myList := s.Vals
-	       		            s.Vals = vals
-	       		            s.Vals.Push(myList)
-	       		            return s
-	       		    	},
-	       		    	Parent: s.OnEndInfo,
-	       		    }
-	       		    return s
-	       		},
-	 	    })
-		    tokens = parentTokens
-		    tokenStack = tokenStack[0 : len(tokenStack)-1]
-		    continue
-		case '}':
-	     	parentTokens := tokenStack[len(tokenStack)-1]
-			parentTokens = append(parentTokens, Token{
-	       		SourceIndex: i,
-	       		Source: src,
-	       		Tokens: tokens,
-	       		Name: "}",
-	       		Action: func(s *State) *State {
-	       		    vals := s.Vals
-	       		    s.Vals = NewList()
-	       		    s.Code = tokens
-	       		    s.OnEndInfo = &OnEndInfo{
-	       		        OnEnd: func(s *State) *State {
-	       		            myList := s.Vals
-	       		            myRecord := NewRecord()
-	       		            for i := 0; i < myList.Length() - 1; i += 2 {
-	       		                myRecord.Set(myList.Get(i+1).(string), myList.Get(i+2))
-	       		            }
-	       		            s.Vals = vals
-	       		            s.Vals.Push(myRecord)
-	       		            return s
-	       		    	},
-	       		    	Parent: s.OnEndInfo,
-  	       		    }
-       	            return s
-	       		},
-	 	    })
-		    tokens = parentTokens
-		    tokenStack = tokenStack[0 : len(tokenStack)-1]
-		    continue
-		}
 		switch parseState {
 		case "out":
 			switch chr {
@@ -229,18 +165,117 @@ func ParseString(src, filename string) []Token {
 					// i++
 					break
 				}
+			case '(', '{', '[':
+			    tokenStack = append(tokenStack, tokens)
+			    tokens = []Token{}
+			    continue
+			case ')':
+	 	    	localTokens := tokens
+	 	    	localTokens = append(localTokens, Token{
+			    	Action: immediates["\n"],
+			    	Name: "\n",
+			    	SourceIndex: i,
+			    	Source: src,
+			    	IsString: isString,
+				})
+	 	    	parentTokens := tokenStack[len(tokenStack)-1]
+				parentTokens = append(parentTokens, Token{
+	 	      		SourceIndex: i,
+	 	      		Source: src,
+	 	      		Tokens: localTokens,
+	 	      		Name: "()",
+	 	      		Action: func(s *State) *State {
+  	     		        s.Push(localTokens)
+  	     		        return s
+	 	      		},
+	 		    })
+			    tokens = parentTokens
+			    tokenStack = tokenStack[0 : len(tokenStack)-1]
+			    continue
+			case ']':
+	 	    	localTokens := tokens
+	 	    	localTokens = append(localTokens, Token{
+			    	Action: immediates["\n"],
+			    	Name: "\n",
+			    	SourceIndex: i,
+			    	Source: src,
+			    	IsString: isString,
+				})
+	 	    	parentTokens := tokenStack[len(tokenStack)-1]
+				parentTokens = append(parentTokens, Token{
+	 	      		SourceIndex: i,
+	 	      		Source: src,
+	 	      		Tokens: localTokens,
+	 	      		Name: "]",
+	 	      		Action: func(s *State) *State {
+	 	      		    vals := s.Vals
+	 	      		    s.Vals = NewList()
+	 	      		    s.Code = localTokens
+	 	      		    s.OnEndInfo = &OnEndInfo{
+	 	      		        OnEnd: func(s *State) *State {
+	 	      		            myList := s.Vals
+	 	      		            s.Vals = vals
+	 	      		            s.Vals.Push(myList)
+	 	      		            return s
+	 	      		    	},
+	 	      		    	Parent: s.OnEndInfo,
+	 	      		    }
+	 	      		    return s
+	 	      		},
+	 		    })
+			    tokens = parentTokens
+			    tokenStack = tokenStack[0 : len(tokenStack)-1]
+			    continue
+			case '}':
+	 	    	localTokens := tokens
+	 	    	localTokens = append(localTokens, Token{
+			    	Action: immediates["\n"],
+			    	Name: "\n",
+			    	SourceIndex: i,
+			    	Source: src,
+			    	IsString: isString,
+				})
+	 	    	parentTokens := tokenStack[len(tokenStack)-1]
+				parentTokens = append(parentTokens, Token{
+	 	      		SourceIndex: i,
+	 	      		Source: src,
+	 	      		Tokens: localTokens,
+	 	      		Name: "}",
+	 	      		Action: func(s *State) *State {
+	 	      		    vals := s.Vals
+	 	      		    s.Vals = NewList()
+	 	      		    s.Code = localTokens
+	 	      		    s.OnEndInfo = &OnEndInfo{
+	 	      		        OnEnd: func(s *State) *State {
+	 	      		            myList := s.Vals
+	 	      		            myRecord := NewRecord()
+	 	      		            for i := 0; i < myList.Length() - 1; i += 2 {
+	 	      		                myRecord.Set(myList.Get(i+1).(string), myList.Get(i+2))
+	 	      		            }
+	 	      		            s.Vals = vals
+	 	      		            s.Vals.Push(myRecord)
+	 	      		            return s
+	 	      		    	},
+	 	      		    	Parent: s.OnEndInfo,
+  		       		    }
+  	     	            return s
+	 	      		},
+	 		    })
+			    tokens = parentTokens
+			    tokenStack = tokenStack[0 : len(tokenStack)-1]
+			    continue
 			default:
 				parseState = "in"
 				startToken = i
 			}
 		case "in":
 			switch chr {
-			case ' ', '\t', '\n', ';', ',':
+			case ' ', '\t', '\n', ';', ',', '(', ')', '{', '}', '[', ']':
                 parseState = "out"
 				name = src[startToken:i]
 				i--
-				if chr == '\n' || chr == ';' || chr == ','  {
-					// i++
+				if chr == ' ' || chr == '\t' {
+				    i++
 				}
 				if immediate, ok := immediates[name]; ok {
 					funcToken = immediate
@@ -439,7 +474,8 @@ var immediates = map[string]func(*State) *State{
 
 var builtins = map[string]func(*State) *State{
 	"do": func(s *State) *State {
-		v := s.Pop().([]Token)
+		vI := s.Pop()
+		v := vI.([]Token)
 		oldCode := s.Code
 		oldI := s.I
 		s.Code = v
@@ -589,7 +625,7 @@ func (state *State) FindParentAndValue(varName string) (*State, any) {
 	scopesUp := 0
 	for state != nil {
 		time.Sleep(500 * time.Millisecond)
-		fmt.Println("going up scope", varName)
+		log.Println("going up scope after 500ms", varName)
 
 		v, ok := state.Vars.GetHas(varName)
 		if ok {
