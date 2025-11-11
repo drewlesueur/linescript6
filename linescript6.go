@@ -20,11 +20,16 @@ type Token struct {
     Filename string
 }
 
-func ShowTokens(indent string, tokens []Token) string {
+func ShowTokens(tokens []Token) string {
+    return ShowTokensInternal(0, "", tokens)
+}
+func ShowTokensInternal(level int, indent string, tokens []Token) string {
     str := ""
     for _, t := range tokens {
         if len(t.Tokens) > 0 {
-            str += ShowTokens(indent + "    ", t.Tokens)
+            str += fmt.Sprintf("%s%s\n", indent, "{")
+            str += ShowTokensInternal(level + 1, indent + "    ", t.Tokens)
+            str += fmt.Sprintf("%s%s\n", indent, "}")
         } else {
             str += fmt.Sprintf("%s%q\n", indent, t.Name)
         }
@@ -138,27 +143,86 @@ func Tokenize(sources []any, filename string) []Token {
     return tokens
 }
 
+
+
 // onEnd list (stack) of closures is the trick
 // auto indent nested tokens
 func ParseString(src, filename string) []Token {
 	tokenStack := [][]Token{}
 	tokens := []Token{}
-	parseState := "out"
+	parseState := "freshLine"
 	name := ""
 	var funcToken func (s *State) *State = nil
-	startToken := -1
+	startToken := 0
 	i := 0
 	isString := false
+	// indentStack := []string
+	indent := ""
 	for i = i; i < len(src); i++ {
 		chr := src[i]
 
 		// time.Sleep(1 * time.Millisecond)
 		// fmt.Println("    reading", i, string(chr), len(s.Code))
 		switch parseState {
+		case "freshLine":
+			// i--
+			// parseState = "out"
+			// continue
+			
+			
+			switch chr {
+			case ' ', '\t':
+			default:
+			    oldIndent := indent
+			    indent = src[startToken:i]
+			    log.Println("#pink", toJson(string(chr)), "|", toJson(oldIndent), "|", toJson(indent))
+			    if indent == "" && chr == '\n' {
+			        startToken = i + 1
+			        indent = oldIndent
+			    	log.Println("#orange", toJson(indent))
+			        continue
+			    }
+			    i--
+			    if len(indent) > len(oldIndent) {
+			    	log.Println("#lawngreen indenting")
+			    	if len(tokens) > 0 && tokens[len(tokens)-1].Name == "\n" {
+			    		tokens = tokens[0:len(tokens)-1] // removing the newline
+			    	}
+			    	tokenStack = append(tokenStack, tokens)
+			    	tokens = []Token{}
+			    	parseState = "out"
+			    	continue
+			    }
+			    if len(indent) < len(oldIndent) {
+			    	log.Println("#coral dedenting")
+	 	    		localTokens := tokens
+	 	    		parentTokens := tokenStack[len(tokenStack)-1]
+					parentTokens = append(parentTokens, Token{
+	 	     	 		SourceIndex: i,
+	 	     	 		Source: src,
+	 	     	 		Tokens: localTokens,
+	 	     	 		Name: "()",
+	 	     	 		Action: func(s *State) *State {
+  	     			        s.Push(localTokens)
+  	     			        return s
+	 	     	 		},
+	 		    	})
+			    	tokens = parentTokens
+			    	tokenStack = tokenStack[0 : len(tokenStack)-1]
+			    	parseState = "out"
+			    	continue
+			    }
+			    parseState = "out"
+			    continue
+			}
 		case "out":
 			switch chr {
 			case ' ', '\t':
 			case '\n', ';', ',':
+			    if chr == '\n' {
+			        parseState = "freshLine"
+			        startToken = i + 1
+			    }
 				name = string(chr)
 				if immediate, ok := immediates[name]; ok {
 					funcToken = immediate
@@ -166,10 +230,15 @@ func ParseString(src, filename string) []Token {
 					break
 				}
 			case '(', '{', '[':
+  			    indent = "" // ??
+		    	log.Println("#aqua indenting", string(chr))
+		    	// log.Println(ShowTokens("", tokens))
+		    	// log.Println("#aqua ook")
 			    tokenStack = append(tokenStack, tokens)
 			    tokens = []Token{}
 			    continue
 			case ')':
+		    	log.Println("#yellow dedenting", string(chr))
 	 	    	localTokens := tokens
 	 	    	localTokens = append(localTokens, Token{
 			    	Action: immediates["\n"],
@@ -178,6 +247,7 @@ func ParseString(src, filename string) []Token {
 			    	Source: src,
 			    	IsString: isString,
 				})
+		    	log.Println("#yellow added \\n")
 	 	    	parentTokens := tokenStack[len(tokenStack)-1]
 				parentTokens = append(parentTokens, Token{
 	 	      		SourceIndex: i,
@@ -274,8 +344,12 @@ func ParseString(src, filename string) []Token {
                 parseState = "out"
 				name = src[startToken:i]
 				i--
-				if chr == ' ' || chr == '\t' {
-				    i++
+				// if chr == ' ' || chr == '\t' {
+				//     i++
+				// }
+				if name == "end" {
+				    name = ""
+				    continue
 				}
 				if immediate, ok := immediates[name]; ok {
 					funcToken = immediate
@@ -367,6 +441,7 @@ func ParseString(src, filename string) []Token {
 			    Source: src,
 			    IsString: isString,
 			})
+	    	log.Println("#orange appended", string(toJson(name)), len(tokens))
 			name = ""
 			isString = false
 			funcToken = nil

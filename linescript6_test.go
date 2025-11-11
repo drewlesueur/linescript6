@@ -1,47 +1,112 @@
 package linescript6
 
 import (
-"fmt"
+    "fmt"
 // "testing"
 )
-
-func ExampleParseString_a() {
-	tokens := ParseString(`
-        say1 .hello
-    `, "")
-    fmt.Println(ShowTokens("", tokens))
-
-    // Output:
-    // "\n"
-    // "say1"
-    // ".hello"
-    // "\n"
-}
 
 func ExampleParseString_block() {
 	tokens := ParseString(`
         (say1 .hello)
     `, "")
-    fmt.Println(ShowTokens("", tokens))
+    fmt.Println(ShowTokens(tokens))
 
     // Output:
-    // "\n"
+    // {
     //     "say1"
     //     ".hello"
     //     "\n"
+    // }
     // "\n"
 }
+
+func ExampleParseString_a() {
+	tokens := ParseString(`
+        say1 .hello
+    `, "")
+    fmt.Println(ShowTokens(tokens))
+
+    // Output:
+    // "say1"
+    // ".hello"
+    // "\n"
+}
+
+func ExampleParseString_indent() {
+	tokens := ParseString(`
+        hello
+           a b c
+           d e f
+        end ok
+        yo
+    `, "")
+    fmt.Println(ShowTokens(tokens))
+
+    // Output:
+    // "hello"
+    // {
+    //     "a"
+    //     "b"
+    //     "c"
+    //     "\n"
+    //     "d"
+    //     "e"
+    //     "f"
+    //     "\n"
+    // }
+    // "ok"
+    // "\n"
+    // "yo"
+    // "\n"
+}
+func ExampleParseString_indent2() {
+	tokens := ParseString(`
+        hello
+           a b
+           d e
+              more stuff
+              here
+           end
+        end ok
+        yo
+    `, "")
+    fmt.Println(ShowTokens(tokens))
+
+    // Output:
+    // "hello"
+    // {
+    //     "a"
+    //     "b"
+    //     "\n"
+    //     "d"
+    //     "e"
+    //     {
+    //         "more"
+    //         "stuff"
+    //         "\n"
+    //         "here"
+    //         "\n"
+    //     }
+    //     "\n"
+    // }
+    // "ok"
+    // "\n"
+    // "yo"
+    // "\n"
+}
+
 func ExampleParseString_block3() {
 	tokens := ParseString(`
         (say1 .hello) do
     `, "")
-    fmt.Println(ShowTokens("", tokens))
+    fmt.Println(ShowTokens(tokens))
 
     // Output:
-    // "\n"
+    // {
     //     "say1"
     //     ".hello"
     //     "\n"
+    // }
     // "do"
     // "\n"
 }
@@ -102,7 +167,6 @@ func ExampleParseString_yo() {
     }
 
 	// Output:
-    // token: "\n"
     // token: "say1"
     // token: ".hello"
     // token: "\n"
