@@ -398,6 +398,7 @@ theLoop:
 
                 // you could either do the closure
                 // or just push 2 things to the tokens slice
+				name := name
 				funcToken = func(s *State) *State {
 					_, v := s.FindParentAndValue(name)
 					switch v.(type) {
@@ -720,9 +721,6 @@ func (s *State) R(tokens []Token) *State {
 func (state *State) FindParentAndValue(varName string) (*State, any) {
 	scopesUp := 0
 	for state != nil {
-		// time.Sleep(500 * time.Millisecond)
-		log.Println("going up scope after 500ms", varName)
-
 		v, ok := state.Vars.GetHas(varName)
 		if ok {
 			return state, v

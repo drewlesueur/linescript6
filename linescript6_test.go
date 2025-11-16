@@ -192,3 +192,12 @@ func ExampleParseString_yo() {
     // token: ".hello"
     // token: "\n"
 }
+func ExampleE_var() {
+	E(`
+        var .name .Drew
+        say1 name
+    `)
+
+	// Output:
+	// Drew
+}
