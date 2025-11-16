@@ -158,6 +158,7 @@ func ParseString(src, filename string) []Token {
 	isString := false
 	// indentStack := []string
 	indent := ""
+theLoop:
 	for i = i; i < len(src); i++ {
 		chr := src[i]
 
@@ -350,6 +351,14 @@ func ParseString(src, filename string) []Token {
 				if name == "end" {
 				    name = ""
 				    continue
+				}
+				if name == "//" {
+				    newlinePos := strings.Index(src[i:], "\n")
+				    if newlinePos == -1 {
+				        break theLoop
+				    }
+				    newlinePos = i + newlinePos
+				    i = newlinePos + 1
 				}
 				if immediate, ok := immediates[name]; ok {
 					funcToken = immediate
@@ -548,6 +557,12 @@ var immediates = map[string]func(*State) *State{
 }
 
 var builtins = map[string]func(*State) *State{
+	"var": func(s *State) *State {
+		val := s.Pop()
+		varName := s.Pop()
+		s.Var(varName, val)
+		return s
+	},
 	"do": func(s *State) *State {
 		vI := s.Pop()
 		v := vI.([]Token)
@@ -592,20 +607,26 @@ func (s *State) Pop() any {
 var GlobalState *State
 
 func init() {
-	GlobalState = NewGlobalState()
+	GlobalState = NewTopLevelState()
 }
 
 func E(sources ...any) {
 	GlobalState.E(sources...)
 }
 
-func NewGlobalState() *State {
+func NewTopLevelState() *State {
 	s := &State{
 		Vals:    NewList(),
 		Vars:    NewRecord(), // since it's global, we reuse global vars
 		CallbacksCh: make(chan Callback),
 	}
 	go s.Chug()
+	s.E(`
+        // say1 .what
+        // var .a 100
+        // say1 a
+        // say1 .what2
+	`)
 	return s
 }
 
@@ -699,7 +720,7 @@ func (s *State) R(tokens []Token) *State {
 func (state *State) FindParentAndValue(varName string) (*State, any) {
 	scopesUp := 0
 	for state != nil {
-		time.Sleep(500 * time.Millisecond)
+		// time.Sleep(500 * time.Millisecond)
 		log.Println("going up scope after 500ms", varName)
 
 		v, ok := state.Vars.GetHas(varName)

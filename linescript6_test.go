@@ -31,6 +31,27 @@ func ExampleParseString_a() {
     // ".hello"
     // "\n"
 }
+func ExampleParseString_def() {
+	tokens := ParseString(`
+        def foo a b
+           a + b
+        end
+    `, "")
+    fmt.Println(ShowTokens(tokens))
+
+    // Output:
+    // "def"
+    // "foo"
+    // "a"
+    // "b"
+    // {
+    //     "a"
+    //     "+"
+    //     "b"
+    //     "\n"
+    // }
+    // "\n"
+}
 
 func ExampleParseString_indent() {
 	tokens := ParseString(`
