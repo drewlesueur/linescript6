@@ -118,7 +118,7 @@ func ExampleParseString_indent2() {
 
 func ExampleParseString_block3() {
 	tokens := ParseString(`
-        (say1 .hello) do
+        (say1 .hello) yo
     `, "")
     fmt.Println(ShowTokens(tokens))
 
@@ -128,7 +128,7 @@ func ExampleParseString_block3() {
     //     ".hello"
     //     "\n"
     // }
-    // "do"
+    // "yo"
     // "\n"
 }
 

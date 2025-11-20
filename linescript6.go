@@ -1,40 +1,39 @@
 package linescript6
 
-
 import (
-    "fmt"
-    "strconv"
-    "strings"
-    "time"
-    "log"
-    "encoding/json"
+	"encoding/json"
+	"fmt"
+	"log"
+	"strconv"
+	"strings"
+	"time"
 )
 
 type Token struct {
-    Name string
-    IsString bool
-    Tokens []Token
-    Action func(*State) *State
-    SourceIndex int
-    Source string
-    Filename string
+	Name        string
+	IsString    bool
+	Tokens      []Token
+	Action      func(*State) *State
+	SourceIndex int
+	Source      string
+	Filename    string
 }
 
 func ShowTokens(tokens []Token) string {
-    return ShowTokensInternal(0, "", tokens)
+	return ShowTokensInternal(0, "", tokens)
 }
 func ShowTokensInternal(level int, indent string, tokens []Token) string {
-    str := ""
-    for _, t := range tokens {
-        if len(t.Tokens) > 0 {
-            str += fmt.Sprintf("%s%s\n", indent, "{")
-            str += ShowTokensInternal(level + 1, indent + "    ", t.Tokens)
-            str += fmt.Sprintf("%s%s\n", indent, "}")
-        } else {
-            str += fmt.Sprintf("%s%q\n", indent, t.Name)
-        }
-    }
-    return str
+	str := ""
+	for _, t := range tokens {
+		if len(t.Tokens) > 0 {
+			str += fmt.Sprintf("%s%s\n", indent, "{")
+			str += ShowTokensInternal(level+1, indent+"    ", t.Tokens)
+			str += fmt.Sprintf("%s%s\n", indent, "}")
+		} else {
+			str += fmt.Sprintf("%s%q\n", indent, t.Name)
+		}
+	}
+	return str
 }
 
 type State struct {
@@ -48,7 +47,7 @@ type State struct {
 	InCurrentCall bool
 	NewlineSpot   int
 	OnEndInfo     *OnEndInfo
-	CallbacksCh chan Callback
+	CallbacksCh   chan Callback
 }
 
 type CurFuncInfo struct {
@@ -64,86 +63,84 @@ type OnEndInfo struct {
 type Callback struct {
 	State        *State
 	ReturnValues *List
-	Vars *Record
+	Vars         *Record
 }
 
 func Tokenize(sources []any, filename string) []Token {
-    tokens := []Token{}
-    for _, src := range sources {
-        switch src := src.(type) {
-        case string:
-            tokens = append(tokens, ParseString(src, filename)...)
-        case func(*State) *State:
+	tokens := []Token{}
+	for _, src := range sources {
+		switch src := src.(type) {
+		case string:
+			tokens = append(tokens, ParseString(src, filename)...)
+		case func(*State) *State:
 			tokens = append(tokens, Token{
-			    Action: src,
-			    Filename: filename,
+				Action:   src,
+				Filename: filename,
 			})
 		case func():
 			tokens = append(tokens, Token{
-			    Action: func(s *State) *State {
-			        src()
-			        return s
-			    },
-			    Filename: filename,
+				Action: func(s *State) *State {
+					src()
+					return s
+				},
+				Filename: filename,
 			})
 		case func() any:
 			tokens = append(tokens, Token{
-			    Action: func(s *State) *State {
-			        v := src()
-			        s.Push(v)
-			        return s
-			    },
-			    Filename: filename,
+				Action: func(s *State) *State {
+					v := src()
+					s.Push(v)
+					return s
+				},
+				Filename: filename,
 			})
 		case func(any) any:
 			tokens = append(tokens, Token{
-			    Action: func(s *State) *State {
+				Action: func(s *State) *State {
 					s.Push(src(s.Pop()))
-			    	return s
-			    },
-			    Filename: filename,
+					return s
+				},
+				Filename: filename,
 			})
 		case func(any):
 			tokens = append(tokens, Token{
-			    Action: func(s *State) *State {
+				Action: func(s *State) *State {
 					src(s.Pop())
-			    	return s
-			    },
-			    Filename: filename,
+					return s
+				},
+				Filename: filename,
 			})
 		case func(string) string:
 			tokens = append(tokens, Token{
-			    Action: func(s *State) *State {
+				Action: func(s *State) *State {
 					s.Push(src(toStringInternal(s.Pop())))
-			    	return s
-			    },
-			    Filename: filename,
+					return s
+				},
+				Filename: filename,
 			})
 		case func(string, string) string:
 			tokens = append(tokens, Token{
-			    Action: func(s *State) *State {
+				Action: func(s *State) *State {
 					b := toStringInternal(s.Pop())
 					a := toStringInternal(s.Pop())
 					s.Push(src(a, b))
-			    	return s
-			    },
-			    Filename: filename,
+					return s
+				},
+				Filename: filename,
 			})
 		default:
 			tokens = append(tokens, Token{
-			    Name: "customType",
-			    Action: func(s *State) *State {
+				Name: "customType",
+				Action: func(s *State) *State {
 					s.Push(src)
-			    	return s
-			    },
-			    Filename: filename,
+					return s
+				},
+				Filename: filename,
 			})
-        }
-    }
-    return tokens
+		}
+	}
+	return tokens
 }
-
-
 
 // onEnd list (stack) of closures is the trick
 // auto indent nested tokens
@@ -152,7 +149,7 @@ func ParseString(src, filename string) []Token {
 	tokens := []Token{}
 	parseState := "freshLine"
 	name := ""
-	var funcToken func (s *State) *State = nil
+	var funcToken func(s *State) *State = nil
 	startToken := 0
 	i := 0
 	isString := false
@@ -169,61 +166,60 @@ theLoop:
 			// i--
 			// parseState = "out"
 			// continue
-			
-			
+
 			switch chr {
 			case ' ', '\t':
 			default:
-			    oldIndent := indent
-			    indent = src[startToken:i]
-			    log.Println("#pink", toJson(string(chr)), "|", toJson(oldIndent), "|", toJson(indent))
-			    if indent == "" && chr == '\n' {
-			        startToken = i + 1
-			        indent = oldIndent
-			    	log.Println("#orange", toJson(indent))
-			        continue
-			    }
-			    i--
-			    if len(indent) > len(oldIndent) {
-			    	log.Println("#lawngreen indenting")
-			    	if len(tokens) > 0 && tokens[len(tokens)-1].Name == "\n" {
-			    		tokens = tokens[0:len(tokens)-1] // removing the newline
-			    	}
-			    	tokenStack = append(tokenStack, tokens)
-			    	tokens = []Token{}
-			    	parseState = "out"
-			    	continue
-			    }
-			    if len(indent) < len(oldIndent) {
-			    	log.Println("#coral dedenting")
-	 	    		localTokens := tokens
-	 	    		parentTokens := tokenStack[len(tokenStack)-1]
+				oldIndent := indent
+				indent = src[startToken:i]
+				log.Println("#pink", toJson(string(chr)), "|", toJson(oldIndent), "|", toJson(indent))
+				if indent == "" && chr == '\n' {
+					startToken = i + 1
+					indent = oldIndent
+					log.Println("#orange", toJson(indent))
+					continue
+				}
+				i--
+				if len(indent) > len(oldIndent) {
+					log.Println("#lawngreen indenting")
+					if len(tokens) > 0 && tokens[len(tokens)-1].Name == "\n" {
+						tokens = tokens[0 : len(tokens)-1] // removing the newline
+					}
+					tokenStack = append(tokenStack, tokens)
+					tokens = []Token{}
+					parseState = "out"
+					continue
+				}
+				if len(indent) < len(oldIndent) {
+					log.Println("#coral dedenting")
+					localTokens := tokens
+					parentTokens := tokenStack[len(tokenStack)-1]
 					parentTokens = append(parentTokens, Token{
-	 	     	 		SourceIndex: i,
-	 	     	 		Source: src,
-	 	     	 		Tokens: localTokens,
-	 	     	 		Name: "()",
-	 	     	 		Action: func(s *State) *State {
-  	     			        s.Push(localTokens)
-  	     			        return s
-	 	     	 		},
-	 		    	})
-			    	tokens = parentTokens
-			    	tokenStack = tokenStack[0 : len(tokenStack)-1]
-			    	parseState = "out"
-			    	continue
-			    }
-			    parseState = "out"
-			    continue
+						SourceIndex: i,
+						Source:      src,
+						Tokens:      localTokens,
+						Name:        "()",
+						Action: func(s *State) *State {
+							s.Push(localTokens)
+							return s
+						},
+					})
+					tokens = parentTokens
+					tokenStack = tokenStack[0 : len(tokenStack)-1]
+					parseState = "out"
+					continue
+				}
+				parseState = "out"
+				continue
 			}
 		case "out":
 			switch chr {
 			case ' ', '\t':
 			case '\n', ';', ',':
-			    if chr == '\n' {
-			        parseState = "freshLine"
-			        startToken = i + 1
-			    }
+				if chr == '\n' {
+					parseState = "freshLine"
+					startToken = i + 1
+				}
 				name = string(chr)
 				if immediate, ok := immediates[name]; ok {
 					funcToken = immediate
@@ -231,110 +227,110 @@ theLoop:
 					break
 				}
 			case '(', '{', '[':
-  			    indent = "" // ??
-		    	log.Println("#aqua indenting", string(chr))
-		    	// log.Println(ShowTokens("", tokens))
-		    	// log.Println("#aqua ook")
-			    tokenStack = append(tokenStack, tokens)
-			    tokens = []Token{}
-			    continue
+				indent = "" // ??
+				log.Println("#aqua indenting", string(chr))
+				// log.Println(ShowTokens("", tokens))
+				// log.Println("#aqua ook")
+				tokenStack = append(tokenStack, tokens)
+				tokens = []Token{}
+				continue
 			case ')':
-		    	log.Println("#yellow dedenting", string(chr))
-	 	    	localTokens := tokens
-	 	    	localTokens = append(localTokens, Token{
-			    	Action: immediates["\n"],
-			    	Name: "\n",
-			    	SourceIndex: i,
-			    	Source: src,
-			    	IsString: isString,
+				log.Println("#yellow dedenting", string(chr))
+				localTokens := tokens
+				localTokens = append(localTokens, Token{
+					Action:      immediates["\n"],
+					Name:        "\n",
+					SourceIndex: i,
+					Source:      src,
+					IsString:    isString,
 				})
-		    	log.Println("#yellow added \\n")
-	 	    	parentTokens := tokenStack[len(tokenStack)-1]
+				log.Println("#yellow added \\n")
+				parentTokens := tokenStack[len(tokenStack)-1]
 				parentTokens = append(parentTokens, Token{
-	 	      		SourceIndex: i,
-	 	      		Source: src,
-	 	      		Tokens: localTokens,
-	 	      		Name: "()",
-	 	      		Action: func(s *State) *State {
-  	     		        s.Push(localTokens)
-  	     		        return s
-	 	      		},
-	 		    })
-			    tokens = parentTokens
-			    tokenStack = tokenStack[0 : len(tokenStack)-1]
-			    continue
+					SourceIndex: i,
+					Source:      src,
+					Tokens:      localTokens,
+					Name:        "()",
+					Action: func(s *State) *State {
+						s.Push(localTokens)
+						return s
+					},
+				})
+				tokens = parentTokens
+				tokenStack = tokenStack[0 : len(tokenStack)-1]
+				continue
 			case ']':
-	 	    	localTokens := tokens
-	 	    	localTokens = append(localTokens, Token{
-			    	Action: immediates["\n"],
-			    	Name: "\n",
-			    	SourceIndex: i,
-			    	Source: src,
-			    	IsString: isString,
+				localTokens := tokens
+				localTokens = append(localTokens, Token{
+					Action:      immediates["\n"],
+					Name:        "\n",
+					SourceIndex: i,
+					Source:      src,
+					IsString:    isString,
 				})
-	 	    	parentTokens := tokenStack[len(tokenStack)-1]
+				parentTokens := tokenStack[len(tokenStack)-1]
 				parentTokens = append(parentTokens, Token{
-	 	      		SourceIndex: i,
-	 	      		Source: src,
-	 	      		Tokens: localTokens,
-	 	      		Name: "]",
-	 	      		Action: func(s *State) *State {
-	 	      		    vals := s.Vals
-	 	      		    s.Vals = NewList()
-	 	      		    s.Code = localTokens
-	 	      		    s.OnEndInfo = &OnEndInfo{
-	 	      		        OnEnd: func(s *State) *State {
-	 	      		            myList := s.Vals
-	 	      		            s.Vals = vals
-	 	      		            s.Vals.Push(myList)
-	 	      		            return s
-	 	      		    	},
-	 	      		    	Parent: s.OnEndInfo,
-	 	      		    }
-	 	      		    return s
-	 	      		},
-	 		    })
-			    tokens = parentTokens
-			    tokenStack = tokenStack[0 : len(tokenStack)-1]
-			    continue
+					SourceIndex: i,
+					Source:      src,
+					Tokens:      localTokens,
+					Name:        "]",
+					Action: func(s *State) *State {
+						vals := s.Vals
+						s.Vals = NewList()
+						s.Code = localTokens
+						s.OnEndInfo = &OnEndInfo{
+							OnEnd: func(s *State) *State {
+								myList := s.Vals
+								s.Vals = vals
+								s.Vals.Push(myList)
+								return s
+							},
+							Parent: s.OnEndInfo,
+						}
+						return s
+					},
+				})
+				tokens = parentTokens
+				tokenStack = tokenStack[0 : len(tokenStack)-1]
+				continue
 			case '}':
-	 	    	localTokens := tokens
-	 	    	localTokens = append(localTokens, Token{
-			    	Action: immediates["\n"],
-			    	Name: "\n",
-			    	SourceIndex: i,
-			    	Source: src,
-			    	IsString: isString,
+				localTokens := tokens
+				localTokens = append(localTokens, Token{
+					Action:      immediates["\n"],
+					Name:        "\n",
+					SourceIndex: i,
+					Source:      src,
+					IsString:    isString,
 				})
-	 	    	parentTokens := tokenStack[len(tokenStack)-1]
+				parentTokens := tokenStack[len(tokenStack)-1]
 				parentTokens = append(parentTokens, Token{
-	 	      		SourceIndex: i,
-	 	      		Source: src,
-	 	      		Tokens: localTokens,
-	 	      		Name: "}",
-	 	      		Action: func(s *State) *State {
-	 	      		    vals := s.Vals
-	 	      		    s.Vals = NewList()
-	 	      		    s.Code = localTokens
-	 	      		    s.OnEndInfo = &OnEndInfo{
-	 	      		        OnEnd: func(s *State) *State {
-	 	      		            myList := s.Vals
-	 	      		            myRecord := NewRecord()
-	 	      		            for i := 0; i < myList.Length() - 1; i += 2 {
-	 	      		                myRecord.Set(myList.Get(i+1).(string), myList.Get(i+2))
-	 	      		            }
-	 	      		            s.Vals = vals
-	 	      		            s.Vals.Push(myRecord)
-	 	      		            return s
-	 	      		    	},
-	 	      		    	Parent: s.OnEndInfo,
-  		       		    }
-  	     	            return s
-	 	      		},
-	 		    })
-			    tokens = parentTokens
-			    tokenStack = tokenStack[0 : len(tokenStack)-1]
-			    continue
+					SourceIndex: i,
+					Source:      src,
+					Tokens:      localTokens,
+					Name:        "}",
+					Action: func(s *State) *State {
+						vals := s.Vals
+						s.Vals = NewList()
+						s.Code = localTokens
+						s.OnEndInfo = &OnEndInfo{
+							OnEnd: func(s *State) *State {
+								myList := s.Vals
+								myRecord := NewRecord()
+								for i := 0; i < myList.Length()-1; i += 2 {
+									myRecord.Set(myList.Get(i+1).(string), myList.Get(i+2))
+								}
+								s.Vals = vals
+								s.Vals.Push(myRecord)
+								return s
+							},
+							Parent: s.OnEndInfo,
+						}
+						return s
+					},
+				})
+				tokens = parentTokens
+				tokenStack = tokenStack[0 : len(tokenStack)-1]
+				continue
 			default:
 				parseState = "in"
 				startToken = i
@@ -342,23 +338,23 @@ theLoop:
 		case "in":
 			switch chr {
 			case ' ', '\t', '\n', ';', ',', '(', ')', '{', '}', '[', ']':
-                parseState = "out"
+				parseState = "out"
 				name = src[startToken:i]
 				i--
 				// if chr == ' ' || chr == '\t' {
 				//     i++
 				// }
 				if name == "end" {
-				    name = ""
-				    continue
+					name = ""
+					continue
 				}
 				if name == "//" {
-				    newlinePos := strings.Index(src[i:], "\n")
-				    if newlinePos == -1 {
-				        break theLoop
-				    }
-				    newlinePos = i + newlinePos
-				    i = newlinePos + 1
+					newlinePos := strings.Index(src[i:], "\n")
+					if newlinePos == -1 {
+						break theLoop
+					}
+					newlinePos = i + newlinePos
+					i = newlinePos + 1
 				}
 				if immediate, ok := immediates[name]; ok {
 					funcToken = immediate
@@ -368,9 +364,9 @@ theLoop:
 				if builtin, ok := builtins[name]; ok {
 					funcToken = func(s *State) *State {
 						s.CurFuncInfo = &CurFuncInfo{
-							Func: builtin,
-							Spot: s.Vals.Len(),
-							Name: name,
+							Func:   builtin,
+							Spot:   s.Vals.Len(),
+							Name:   name,
 							Parent: s.CurFuncInfo,
 						}
 						return s
@@ -396,8 +392,8 @@ theLoop:
 					break
 				}
 
-                // you could either do the closure
-                // or just push 2 things to the tokens slice
+				// you could either do the closure
+				// or just push 2 things to the tokens slice
 				name := name
 				funcToken = func(s *State) *State {
 					_, v := s.FindParentAndValue(name)
@@ -419,7 +415,7 @@ theLoop:
 					// 				Mu:            s.Mu,
 					// 				OnEndInfo:     nil,
 					// 			}
-                    //
+					//
 					// 			for i := len(v.Params) - 1; i >= 0; i-- {
 					// 				param := v.Params[i]
 					// 				newState.Vars.Set(param, s.Pop())
@@ -437,7 +433,7 @@ theLoop:
 					// 	}
 					// 	return s
 					default:
-					    s.Push(v)
+						s.Push(v)
 						return s
 					}
 				}
@@ -445,19 +441,19 @@ theLoop:
 		}
 		if name != "" {
 			tokens = append(tokens, Token{
-			    Action: funcToken,
-			    Name: name,
-			    SourceIndex: i,
-			    Source: src,
-			    IsString: isString,
+				Action:      funcToken,
+				Name:        name,
+				SourceIndex: i,
+				Source:      src,
+				IsString:    isString,
 			})
-	    	log.Println("#orange appended", string(toJson(name)), len(tokens))
+			log.Println("#orange appended", string(toJson(name)), len(tokens))
 			name = ""
 			isString = false
 			funcToken = nil
 		}
 	}
-    return tokens
+	return tokens
 
 }
 
@@ -516,7 +512,7 @@ var immediates = map[string]func(*State) *State{
 		// f := s.CurFuncInfo.Func
 		// p := s.CurFuncInfo.Parent
 		// s.CurFuncInfo = p
-	 //    s.InCurrentCall = true
+		//    s.InCurrentCall = true
 		// newS := f(s)
 		// return newS
 	},
@@ -529,7 +525,7 @@ var immediates = map[string]func(*State) *State{
 		// f := s.CurFuncInfo.Func
 		// p := s.CurFuncInfo.Parent
 		// s.CurFuncInfo = p
-	 //    s.InCurrentCall = true
+		//    s.InCurrentCall = true
 		// newS := f(s)
 		// return newS
 	},
@@ -571,15 +567,15 @@ var builtins = map[string]func(*State) *State{
 		oldI := s.I
 		s.Code = v
 		s.I = 0
-        s.OnEndInfo = &OnEndInfo{
-           OnEnd: func(s *State) *State {
-               s.Code = oldCode
-               s.I = oldI
-               return s
-           },
-           Parent: s.OnEndInfo,
-        }
-		
+		s.OnEndInfo = &OnEndInfo{
+			OnEnd: func(s *State) *State {
+				s.Code = oldCode
+				s.I = oldI
+				return s
+			},
+			Parent: s.OnEndInfo,
+		}
+
 		return s
 	},
 	"say1": func(s *State) *State {
@@ -605,6 +601,7 @@ func (s *State) Push(v any) {
 func (s *State) Pop() any {
 	return s.Vals.Pop()
 }
+
 var GlobalState *State
 
 func init() {
@@ -617,8 +614,8 @@ func E(sources ...any) {
 
 func NewTopLevelState() *State {
 	s := &State{
-		Vals:    NewList(),
-		Vars:    NewRecord(), // since it's global, we reuse global vars
+		Vals:        NewList(),
+		Vars:        NewRecord(), // since it's global, we reuse global vars
 		CallbacksCh: make(chan Callback),
 	}
 	go s.Chug()
@@ -632,34 +629,34 @@ func NewTopLevelState() *State {
 }
 
 func (state *State) Chug() {
-    var origState = state
+	var origState = state
 	var newState *State
 	for {
-        newState = nil
-        if state == nil {
-            callback, ok := <-origState.CallbacksCh
-            if !ok {
-                break
-            }
-            state = callback.State
-            
-            if callback.ReturnValues != nil {
-                for _, v := range callback.ReturnValues.TheSlice {
-                    state.Push(v)
-                }
-            }
-            if callback.Vars != nil {
-                for _, k := range callback.Vars.Keys {
-                    state.Vars.Set(k, callback.Vars.Get(k))
-                }
-            }
-            state.NewlineSpot = state.Vals.Length()
-            continue // you may be fine to not continue, cuz this is at the start
-        }
+		newState = nil
+		if state == nil {
+			callback, ok := <-origState.CallbacksCh
+			if !ok {
+				break
+			}
+			state = callback.State
 
-        if state.InCurrentCall {
-		    if state.CurFuncInfo == nil {
-		    	state.InCurrentCall = false
+			if callback.ReturnValues != nil {
+				for _, v := range callback.ReturnValues.TheSlice {
+					state.Push(v)
+				}
+			}
+			if callback.Vars != nil {
+				for _, k := range callback.Vars.Keys {
+					state.Vars.Set(k, callback.Vars.Get(k))
+				}
+			}
+			state.NewlineSpot = state.Vals.Length()
+			continue // you may be fine to not continue, cuz this is at the start
+		}
+
+		if state.InCurrentCall {
+			if state.CurFuncInfo == nil {
+				state.InCurrentCall = false
 			} else {
 				f := state.CurFuncInfo.Func
 				p := state.CurFuncInfo.Parent
@@ -668,22 +665,22 @@ func (state *State) Chug() {
 				state = newState
 			}
 			continue
-        }
+		}
 
-        if state.I >= len(state.Code) {
-            o := state.OnEndInfo
-            if o != nil {
-                newState = o.OnEnd(state)
-                state.OnEndInfo = o.Parent
-            }
-        } else {
-            t := state.Code[state.I]
-            log.Println("token:", t.Name)
-            newState = t.Action(state)
-        }
+		if state.I >= len(state.Code) {
+			o := state.OnEndInfo
+			if o != nil {
+				newState = o.OnEnd(state)
+				state.OnEndInfo = o.Parent
+			}
+		} else {
+			t := state.Code[state.I]
+			log.Println("token:", t.Name)
+			newState = t.Action(state)
+		}
 
-        state.I++
-        state = newState
+		state.I++
+		state = newState
 	}
 }
 
@@ -703,16 +700,16 @@ func (s *State) R(tokens []Token) *State {
 		Vars:          s.Vars,
 		LexicalParent: s,
 		CallingParent: nil,
-		CallbacksCh: s.CallbacksCh,
+		CallbacksCh:   s.CallbacksCh,
 		OnEndInfo: &OnEndInfo{
-		    OnEnd: func (s *State) *State {
-        		close(doneCh)
-		        return nil
-		    },
+			OnEnd: func(s *State) *State {
+				close(doneCh)
+				return nil
+			},
 		},
 	}
 	s.AddCallback(Callback{
-	    State: freshState,
+		State: freshState,
 	})
 	<-doneCh
 	return freshState
