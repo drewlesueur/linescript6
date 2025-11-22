@@ -56,6 +56,15 @@ type CurFuncInfo struct {
 	Spot   int
 	Parent *CurFuncInfo
 }
+
+type Func struct {
+    Code []Token
+    LexicalParent *State
+	Params            []string
+	Builtin           func(state *State) *State
+	Name              string
+}
+
 type OnEndInfo struct {
 	OnEnd  func(*State) *State
 	Parent *OnEndInfo
@@ -234,7 +243,33 @@ theLoop:
 				tokenStack = append(tokenStack, tokens)
 				tokens = []Token{}
 				continue
+			// case ')':
+			// 	log.Println("#yellow dedenting", string(chr))
+			// 	localTokens := tokens
+			// 	localTokens = append(localTokens, Token{
+			// 		Action:      immediates["\n"],
+			// 		Name:        "\n",
+			// 		SourceIndex: i,
+			// 		Source:      src,
+			// 		IsString:    isString,
+			// 	})
+			// 	log.Println("#yellow added \\n")
+			// 	parentTokens := tokenStack[len(tokenStack)-1]
+			// 	parentTokens = append(parentTokens, Token{
+			// 		SourceIndex: i,
+			// 		Source:      src,
+			// 		Tokens:      localTokens,
+			// 		Name:        "()",
+			// 		Action: func(s *State) *State {
+			// 			s.Push(localTokens)
+			// 			return s
+			// 		},
+			// 	})
+			// 	tokens = parentTokens
+			// 	tokenStack = tokenStack[0 : len(tokenStack)-1]
+			// 	continue
 			case ')':
+				// means do right away
 				log.Println("#yellow dedenting", string(chr))
 				localTokens := tokens
 				localTokens = append(localTokens, Token{
@@ -252,7 +287,23 @@ theLoop:
 					Tokens:      localTokens,
 					Name:        "()",
 					Action: func(s *State) *State {
-						s.Push(localTokens)
+						// s.Push(localTokens)
+						// TODO: I could copy the implementation of "do" here
+						// s.Push(builtins["do"])
+						// return s
+
+						oldCode := s.Code
+						oldI := s.I
+						s.Code = localTokens
+						s.I = 0
+						s.OnEndInfo = &OnEndInfo{
+							OnEnd: func(s *State) *State {
+								s.Code = oldCode
+								s.I = oldI
+								return s
+							},
+							Parent: s.OnEndInfo,
+						}
 						return s
 					},
 				})
@@ -260,6 +311,7 @@ theLoop:
 				tokenStack = tokenStack[0 : len(tokenStack)-1]
 				continue
 			case ']':
+				// makes an anonymous block
 				localTokens := tokens
 				localTokens = append(localTokens, Token{
 					Action:      immediates["\n"],
@@ -273,27 +325,55 @@ theLoop:
 					SourceIndex: i,
 					Source:      src,
 					Tokens:      localTokens,
-					Name:        "]",
+					Name:        "[]",
 					Action: func(s *State) *State {
-						vals := s.Vals
-						s.Vals = NewList()
-						s.Code = localTokens
-						s.OnEndInfo = &OnEndInfo{
-							OnEnd: func(s *State) *State {
-								myList := s.Vals
-								s.Vals = vals
-								s.Vals.Push(myList)
-								return s
-							},
-							Parent: s.OnEndInfo,
-						}
+						s.Push(localTokens)
 						return s
 					},
 				})
 				tokens = parentTokens
 				tokenStack = tokenStack[0 : len(tokenStack)-1]
 				continue
+			// case '}':
+			// 	localTokens := tokens
+			// 	localTokens = append(localTokens, Token{
+			// 		Action:      immediates["\n"],
+			// 		Name:        "\n",
+			// 		SourceIndex: i,
+			// 		Source:      src,
+			// 		IsString:    isString,
+			// 	})
+			// 	parentTokens := tokenStack[len(tokenStack)-1]
+			// 	parentTokens = append(parentTokens, Token{
+			// 		SourceIndex: i,
+			// 		Source:      src,
+			// 		Tokens:      localTokens,
+			// 		Name:        "}",
+			// 		Action: func(s *State) *State {
+			// 			vals := s.Vals
+			// 			s.Vals = NewList()
+			// 			s.Code = localTokens
+			// 			s.OnEndInfo = &OnEndInfo{
+			// 				OnEnd: func(s *State) *State {
+			// 					myList := s.Vals
+			// 					myRecord := NewRecord()
+			// 					for i := 0; i < myList.Length()-1; i += 2 {
+			// 						myRecord.Set(myList.Get(i+1).(string), myList.Get(i+2))
+			// 					}
+			// 					s.Vals = vals
+			// 					s.Vals.Push(myRecord)
+			// 					return s
+			// 				},
+			// 				Parent: s.OnEndInfo,
+			// 			}
+			// 			return s
+			// 		},
+			// 	})
+			// 	tokens = parentTokens
+			// 	tokenStack = tokenStack[0 : len(tokenStack)-1]
+			// 	continue
 			case '}':
+				// makes an anonymous func
 				localTokens := tokens
 				localTokens = append(localTokens, Token{
 					Action:      immediates["\n"],
@@ -309,22 +389,10 @@ theLoop:
 					Tokens:      localTokens,
 					Name:        "}",
 					Action: func(s *State) *State {
-						vals := s.Vals
-						s.Vals = NewList()
-						s.Code = localTokens
-						s.OnEndInfo = &OnEndInfo{
-							OnEnd: func(s *State) *State {
-								myList := s.Vals
-								myRecord := NewRecord()
-								for i := 0; i < myList.Length()-1; i += 2 {
-									myRecord.Set(myList.Get(i+1).(string), myList.Get(i+2))
-								}
-								s.Vals = vals
-								s.Vals.Push(myRecord)
-								return s
-							},
-							Parent: s.OnEndInfo,
-						}
+						s.Push(&Func{
+						    Code: localTokens,
+						    LexicalParent: s,
+						})
 						return s
 					},
 				})
@@ -397,41 +465,41 @@ theLoop:
 				name := name
 				funcToken = func(s *State) *State {
 					_, v := s.FindParentAndValue(name)
-					switch v.(type) {
-					// case *Func:
-					// 	v := s.Get(name).(*Func)
-					// 	cfi := &CurFuncInfo{
-					// 		Func: func(s *State) *State {
-					// 			newState := &State{
-					// 				Filename:      v.Filename,
-					// 				I:             v.I,
-					// 				Code:          v.Code,
-					// 				Vals:          s.Vals,
-					// 				Vars:          NewRecord(),
-					// 				LexicalParent: v.LexicalParent,
-					// 				CallingParent: s,
-					// 				CurFuncInfo:   nil,
-					// 				NewlineSpot:   s.NewlineSpot,
-					// 				Mu:            s.Mu,
-					// 				OnEndInfo:     nil,
-					// 			}
-					//
-					// 			for i := len(v.Params) - 1; i >= 0; i-- {
-					// 				param := v.Params[i]
-					// 				newState.Vars.Set(param, s.Pop())
-					// 			}
-					// 			return newState
-					// 		},
-					// 		Spot: s.Vals.Len(),
-					// 		Name: name,
-					// 	}
-					// 	if s.CurFuncInfo == nil {
-					// 		s.CurFuncInfo = cfi
-					// 	} else {
-					// 		cfi.Parent = s.CurFuncInfo
-					// 		s.CurFuncInfo = cfi
-					// 	}
-					// 	return s
+					switch v := v.(type) {
+					case *Func:
+						cfi := &CurFuncInfo{
+							Func: func(s *State) *State {
+								newState := &State{
+									Code:          v.Code,
+									Vals:          s.Vals,
+									Vars:          NewRecord(),
+									LexicalParent: v.LexicalParent,
+									CallingParent: s,
+									CurFuncInfo:   nil,
+									NewlineSpot:   s.NewlineSpot,
+									OnEndInfo:     &OnEndInfo{
+										OnEnd: func(_s *State) *State {
+										    return s
+										},
+										Parent: s.OnEndInfo,
+									},
+								}
+								for i := len(v.Params) - 1; i >= 0; i-- {
+									param := v.Params[i]
+									newState.Vars.Set(param, s.Pop())
+								}
+								return newState
+							},
+							Spot: s.Vals.Len(),
+							Name: name,
+						}
+						if s.CurFuncInfo == nil {
+							s.CurFuncInfo = cfi
+						} else {
+							cfi.Parent = s.CurFuncInfo
+							s.CurFuncInfo = cfi
+						}
+						return s
 					default:
 						s.Push(v)
 						return s
@@ -576,6 +644,52 @@ var builtins = map[string]func(*State) *State{
 			Parent: s.OnEndInfo,
 		}
 
+		return s
+	},
+	"list": func(s *State) *State {
+		vI := s.Pop()
+		v := vI.([]Token)
+		oldCode := s.Code
+		oldI := s.I
+		oldVals := s.Vals
+		s.Vals = NewList()
+		s.Code = v
+		s.OnEndInfo = &OnEndInfo{
+			OnEnd: func(s *State) *State {
+				myList := s.Vals
+				s.Code = oldCode
+				s.I = oldI
+				s.Vals = oldVals
+				s.Vals.Push(myList)
+				return s
+			},
+			Parent: s.OnEndInfo,
+		}
+		return s
+	},
+	"record": func(s *State) *State {
+		vI := s.Pop()
+		v := vI.([]Token)
+		oldCode := s.Code
+		oldI := s.I
+		oldVals := s.Vals
+		s.Vals = NewList()
+		s.Code = v
+		s.OnEndInfo = &OnEndInfo{
+			OnEnd: func(s *State) *State {
+				myList := s.Vals
+				myRecord := NewRecord()
+				for i := 0; i < myList.Length()-1; i += 2 {
+					myRecord.Set(myList.Get(i+1).(string), myList.Get(i+2))
+				}
+				s.Code = oldCode
+				s.I = oldI
+				s.Vals = oldVals
+				s.Vals.Push(myRecord)
+				return s
+			},
+			Parent: s.OnEndInfo,
+		}
 		return s
 	},
 	"say1": func(s *State) *State {
