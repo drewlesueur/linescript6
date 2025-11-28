@@ -26,9 +26,9 @@ func ShowTokensInternal(level int, indent string, tokens []Token) string {
 	str := ""
 	for _, t := range tokens {
 		if len(t.Tokens) > 0 {
-			str += fmt.Sprintf("%s%s\n", indent, "{")
+			str += fmt.Sprintf("%s%s\n", indent, "[")
 			str += ShowTokensInternal(level+1, indent+"    ", t.Tokens)
-			str += fmt.Sprintf("%s%s\n", indent, "}")
+			str += fmt.Sprintf("%s%s\n", indent, "]")
 		} else {
 			str += fmt.Sprintf("%s%q\n", indent, t.Name)
 		}

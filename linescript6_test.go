@@ -12,11 +12,11 @@ func ExampleParseString_block() {
     fmt.Println(ShowTokens(tokens))
 
     // Output:
-    // {
+    // [
     //     "say1"
     //     ".hello"
     //     "\n"
-    // }
+    // ]
     // "\n"
 }
 
@@ -44,12 +44,12 @@ func ExampleParseString_def() {
     // "foo"
     // "a"
     // "b"
-    // {
+    // [
     //     "a"
     //     "+"
     //     "b"
     //     "\n"
-    // }
+    // ]
     // "\n"
 }
 
@@ -65,7 +65,7 @@ func ExampleParseString_indent() {
 
     // Output:
     // "hello"
-    // {
+    // [
     //     "a"
     //     "b"
     //     "c"
@@ -74,7 +74,7 @@ func ExampleParseString_indent() {
     //     "e"
     //     "f"
     //     "\n"
-    // }
+    // ]
     // "ok"
     // "\n"
     // "yo"
@@ -95,21 +95,21 @@ func ExampleParseString_indent2() {
 
     // Output:
     // "hello"
-    // {
+    // [
     //     "a"
     //     "b"
     //     "\n"
     //     "d"
     //     "e"
-    //     {
+    //     [
     //         "more"
     //         "stuff"
     //         "\n"
     //         "here"
     //         "\n"
-    //     }
+    //     ]
     //     "\n"
-    // }
+    // ]
     // "ok"
     // "\n"
     // "yo"
@@ -123,11 +123,11 @@ func ExampleParseString_block3() {
     fmt.Println(ShowTokens(tokens))
 
     // Output:
-    // {
+    // [
     //     "say1"
     //     ".hello"
     //     "\n"
-    // }
+    // ]
     // "yo"
     // "\n"
 }
@@ -140,7 +140,7 @@ func ExampleParseString_block3() {
 
 func ExampleE_block() {
 	E(`
-        (say1 .hello) do
+        [say1 .hello] do
     `)
 
 	// Output:
